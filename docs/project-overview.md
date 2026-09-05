@@ -2,10 +2,11 @@
 
 A TEE-powered marketplace for verifiable automated trading strategies.
 
-Strategy creators upload trading scripts — packaged in Docker, written in any supported
-language — together with a description of how the strategy works. The platform runs each
-strategy inside a Trusted Execution Environment (TEE), which executes it in an isolated,
-tamper-resistant environment and lets it trade through an assigned wallet.
+Strategy creators upload trading scripts — written in TypeScript and deployed as
+Chainlink CRE workflows — together with a description of how the strategy works. The
+platform runs each strategy inside a Trusted Execution Environment (TEE), which executes
+it in an isolated, tamper-resistant environment and lets it trade through an assigned
+wallet.
 
 Investors browse these strategies, review their descriptions and verified performance
 metrics (returns, APY, drawdown), then allocate funds to the strategies they prefer —
@@ -26,61 +27,113 @@ Concretely, it removes the need to trust either party:
 The result is a trustworthy, cryptographically backed record of a strategy, its trades,
 and its performance.
 
+A second benefit: the enclave keeps the strategy's *parameters* private. A creator can
+publish a verifiable track record without revealing the thresholds and signals that
+produce it.
+
+## Architecture
+
+Three layers, each with a single owner:
+
+| Layer | Technology | Responsibility |
+|---|---|---|
+| **Compute** | Chainlink CRE Confidential Workflows | Strategy logic and risk guardrails execute inside a hardware-isolated TEE. Secrets come from the Vault DON. Signed reports leave the enclave. |
+| **Settlement** | Circle Agent Wallets on Arc | One policy-capped USDC wallet per strategy instance. Holds capital, executes trades, enforces spend limits and allowlists. |
+| **Distribution** | Privy | Investor onboarding: social login, embedded wallet, funding, allocation, withdrawal. |
+
+See [prizes.md](prizes.md) for what we build with each and the constraints each
+imposes.
+
 ## Actors
 
 ### Strategy creator
 
-- Packages a strategy as a Docker image.
+- Writes a strategy as a TypeScript CRE workflow.
 - Publishes it to the marketplace with a human-readable description of the approach.
+- Supplies strategy parameters as secrets; these stay inside the enclave.
 - Earns from investor allocations (fee model TBD).
 - Never has custody of investor funds and cannot alter a running strategy in place.
 
 ### Investor
 
+- Signs in with Privy — social login, no seed phrase — and gets an embedded wallet.
 - Browses listed strategies and their descriptions.
 - Reviews verified performance metrics: returns, APY, drawdown, trade history.
-- Allocates funds to chosen strategies, and withdraws.
+- Allocates USDC to chosen strategies, and withdraws.
 - Trusts the numbers because they are attested, not because they trust the creator.
 
 ### Platform
 
-- Runs the TEE infrastructure and schedules strategy containers.
-- Assigns and manages a wallet per strategy instance.
+- Registers strategy workflows and schedules their execution.
+- Provisions and configures an Agent Wallet per strategy instance, with its spending
+  policy.
 - Publishes attestations and the performance record.
 - Is itself untrusted with respect to reported numbers — attestation is what backs them.
 
 ## How it works
 
-1. **Upload** — The creator submits a Docker image plus a strategy description.
-2. **Measure** — The platform records a cryptographic measurement (image digest) of the
-   submitted artifact. This measurement is the strategy's identity.
-3. **Run in TEE** — The image is launched inside a TEE. The enclave produces an
-   attestation binding the running code measurement to the enclave's identity.
-4. **Wallet assignment** — A trading wallet is provisioned for the strategy instance.
-   Its keys are generated inside and never leave the enclave, so only the attested code
-   can sign trades.
-5. **Trade** — The strategy trades through that wallet against the supported venue(s).
-6. **Record** — Trades and resulting performance are recorded and signed from inside the
-   enclave, so the performance record is anchored to the attested measurement.
+1. **Upload** — The creator submits a TypeScript CRE workflow plus a strategy
+   description. Strategy parameters are supplied separately as secrets.
+2. **Measure** — The workflow is registered on-chain with CRE. The registered workflow
+   binary's identity is the strategy's identity; it cannot change without re-registering.
+3. **Run in TEE** — A confidential handler declares which TEE types and regions the
+   workflow accepts. When the trigger fires, the Workflow DON hands execution to an
+   enclave rather than running the callback on the node.
+4. **Wallet assignment** — A Circle Agent Wallet is provisioned on Arc for the strategy
+   instance, with a spending policy: global limits, per-service caps, and contract and
+   chain allowlists. Its control credential is held as a Vault DON secret, retrievable
+   only inside the enclave, so only the attested workflow can move funds.
+5. **Trade** — The strategy trades USDC through venues on Arc.
+6. **Record** — Trades and resulting performance are emitted as reports signed from
+   inside the enclave, so the performance record is anchored to the attested workflow.
 7. **Browse and allocate** — Investors see the strategy, its description, and its
-   verified metrics, and allocate capital.
+   verified metrics, and allocate capital from their Privy wallet.
+
+## Investor flow
+
+```
+Privy embedded wallet (social login, no seed phrase)
+  -> fund with USDC
+  -> allocate            [USDC transfer to the strategy's Arc Agent Wallet]
+  -> strategy trades     [inside the Chainlink enclave]
+  -> withdraw grown balance back to the Privy wallet
+```
+
+The allocate and withdraw transfers are ordinary supported wallet actions on Arc. Fiat
+onramp is mocked — see [prizes.md](prizes.md) for why.
 
 ## Verifiability model
 
 The chain a verifier can check end to end:
 
 ```
-uploaded image  ->  image digest (measurement)
-                      |
-                      v
-              TEE attestation  ->  enclave-held wallet key
-                      |
-                      v
-        signed trade + performance records  ->  reported returns / APY / drawdown
+TypeScript workflow  ->  registered workflow identity (measurement)
+                            |
+                            v
+                    TEE attestation  ->  enclave-held wallet credential
+                            |                        |
+                            v                        v
+                   signed reports          policy-capped Agent Wallet
+                            |
+                            v
+        trade + performance record  ->  reported returns / APY / drawdown
 ```
 
-If any link is broken — a different image, a different enclave, an unsigned record — the
-performance claim does not verify.
+If any link is broken — a different workflow, a different enclave, an unsigned record —
+the performance claim does not verify.
+
+### An honest limit
+
+The wallet credential is held inside the enclave, but the Agent Wallet itself is
+Circle-managed rather than enclave-generated. That is a weaker claim than "the private
+key was born inside the enclave and never existed anywhere else": it means Circle is in
+the trust set for custody, even though only the attested workflow can *direct* the
+wallet.
+
+The spending policy is what compensates. Global limits, per-service caps, and contract
+and chain allowlists bound what a strategy can do with capital regardless of what its
+code attempts — which also mitigates the phase 1 gap below, where strategy code is
+unaudited.
 
 ## Phase 1 scope
 
@@ -93,17 +146,36 @@ Phase 1 deliberately skips formal code audits of uploaded strategies. The focus 
 
 Explicitly **out of scope for phase 1**: auditing strategy code for quality, safety, or
 malicious behaviour. A verified strategy means "this exact code produced these results",
-not "this code is good or safe".
+not "this code is good or safe". Spending policies bound the damage; they do not
+establish that a strategy is sound.
+
+## Phase 2
+
+- **Arbitrary containers.** The Docker-image model — any language, packaged by the
+  creator, measured by image digest — is deferred. CRE runs registered workflows, not
+  arbitrary containers, so phase 1 is TypeScript-only. Supporting Docker means running
+  our own enclaves (AWS Nitro, Intel TDX) and doing attestation ourselves.
+- **Enclave-generated wallet keys**, removing Circle from the custody trust set.
+- **Strategy code review** before listing.
 
 ## Open questions
 
-- Chain / venue support and the execution path for trades.
 - Fee and revenue-sharing model between creator and platform.
-- Capital pooling model: per-investor wallet vs. pooled strategy vault, and how
+- Capital pooling model: per-investor accounting vs. pooled strategy vault, and how
   deposits and withdrawals are accounted mid-strategy.
-- TEE vendor and attestation flow (e.g. AWS Nitro, Intel TDX, SGX) and how attestation
-  documents are published for third-party verification.
-- Egress policy for strategy containers — which external endpoints (market data, RPC) a
-  strategy may reach without weakening the isolation guarantee.
-- Handling of strategy updates: new version as a new measurement and a fresh track
+- Handling of strategy updates: new registration as a new measurement and a fresh track
   record, vs. continuity of history.
+- Whether a confidential handler can sign venue transactions directly, or whether signing
+  must cross back to the DON for a consensus-verified report — this determines how step 5
+  is wired.
+- Enclave execution time and memory limits for a strategy that polls a venue on an
+  interval.
+- Which Arc venue to route through: Uniswap V2 (deployed on testnet), Circle's App Kit
+  Swap SDK, or Tower Exchange as aggregator.
+
+### Resolved
+
+- ~~Chain / venue support~~ — Arc, USDC-denominated.
+- ~~TEE vendor and attestation flow~~ — Chainlink CRE Confidential Workflows.
+- ~~Egress policy for strategy containers~~ — superseded: CRE's confidential HTTP client
+  governs outbound calls, with secrets injected via templates inside the enclave.
