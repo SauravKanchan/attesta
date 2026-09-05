@@ -1,0 +1,20 @@
+# Secrets — never commit
+.env
+.env.local
+*.pem
+*.key
+
+# Dependencies
+node_modules/
+
+# CRE build artifacts
+*.wasm
+*.wasm.br
+dist/
+build/
+
+# OS
+.DS_Store
+
+# CRE build temp
+.cre_build_tmp.js
