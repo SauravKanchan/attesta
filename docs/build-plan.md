@@ -225,6 +225,11 @@ the Vault DON's threshold key — is specified in
 [project-overview.md](project-overview.md#secrets--encrypted-in-the-browser-unreadable-by-the-platform)
 and swaps in at the same seam: `EncryptedSecret.scheme`.
 
+`POST /submissions/:id/secrets` takes an envelope and nothing else — `<scheme>.v1.` then
+that scheme's base64 parts — and refuses a value of any other shape, whichever scheme it
+claims. The route is the only way a parameter enters the platform, so this is where the
+"ciphertext only" claim is enforced rather than merely stated.
+
 ## Out of scope locally
 
 Circle Agent Wallets (no local runtime), Privy (a pasted key supplies the browser's

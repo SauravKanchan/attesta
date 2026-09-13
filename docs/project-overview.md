@@ -38,7 +38,7 @@ Three layers, each with a single owner:
 | Layer | Technology | Responsibility |
 |---|---|---|
 | **Compute** | Chainlink CRE Confidential Workflows | Strategy logic and risk guardrails execute inside a hardware-isolated TEE. Secrets come from the Vault DON. Signed reports leave the enclave. |
-| **Settlement** | Circle Agent Wallets on Arc | One policy-capped USDC wallet per strategy instance. Holds capital, executes trades, enforces spend limits and allowlists. |
+| **Settlement** | USDC vaults on chain | One vault per strategy holds capital and prices deposits and withdrawals with ERC4626 share maths. A strategy's operator signs its settlements. Circle Agent Wallets on Arc are the intended production form — see [Deferred](#deferred). |
 | **Distribution** | Privy | Investor onboarding: social login, embedded wallet, funding, allocation, withdrawal. |
 
 See [prizes.md](prizes.md) for what we build with each and the constraints each
@@ -183,10 +183,16 @@ anything is sent, the backend stores ciphertext in a table with no plaintext col
 | Where it runs | `frontend/src/lib/secrets.ts`, in the browser | Vendored `tdh2.js`, in the browser |
 | Key | 32 random bytes generated in the browser, kept in its own `localStorage`, HKDF-derived per submission | The Vault DON's P256 threshold public key, fetched through the relay |
 | Cipher | AES-256-GCM, random 96-bit IV | AES-256-GCM with the key TDH2-wrapped |
-| Envelope | `local-dev.v1.<iv>.<ciphertext>`, base64 | `{TDH2Ctxt, SymCtxt, Nonce}` |
+| Envelope | `local-dev.v1.<iv>.<ciphertext>` | `tdh2-p256-aesgcm.v1.<Nonce>.<TDH2Ctxt>.<SymCtxt>` |
 | Who can decrypt | That browser, and nothing else | A threshold of Vault DON nodes, releasing only into an attested enclave |
 
 Swapping schemes replaces one function — `encryptValue` — and the scheme tag it writes.
+
+Both envelopes are the same shape — the scheme name, a version, then that scheme's base64
+parts — and `POST /submissions/:id/secrets` refuses anything that is not one, under either
+scheme. That refusal is what makes "the platform holds no readable value" checkable rather
+than asserted: an API key, a hex blob and a passphrase are all opaque strings, so a rule
+that only asked whether a value looked opaque would quietly accept every one of them.
 
 The honest limitation, which the create screen states rather than glosses: under
 `local-dev` the key never leaves the creator's browser, so no enclave can read the
@@ -251,11 +257,16 @@ the performance claim does not verify.
 
 ### An honest limit
 
-The wallet credential is held inside the enclave, but the Agent Wallet itself is
-Circle-managed rather than enclave-generated. That is a weaker claim than "the private
-key was born inside the enclave and never existed anywhere else": it means Circle is in
-the trust set for custody, even though only the attested workflow can *direct* the
-wallet.
+Settlement is the weakest link in the chain. The strategy's operator key is held by the
+platform rather than born inside the enclave, so the attestation covers *what was decided*
+far better than it covers *who could move the money*. The vault's own arithmetic bounds
+the damage — an operator can apply a profit or loss and record a trade, but cannot
+withdraw an investor's capital — and that is a property of the contract rather than a
+promise.
+
+The intended production form is a Circle Agent Wallet per strategy with a spending policy,
+which narrows this further without closing it: Circle would then be in the custody trust
+set even though only the attested workflow could direct the wallet.
 
 A second, narrower limit is that Vault secrets are owner-scoped rather than
 workflow-scoped — see [The residual risk](#the-residual-risk).
@@ -278,6 +289,15 @@ Explicitly **out of scope for phase 1**: auditing strategy code for quality, saf
 malicious behaviour. A verified strategy means "this exact code produced these results",
 not "this code is good or safe". Spending policies bound the damage; they do not
 establish that a strategy is sound.
+
+## Deferred
+
+- **Circle Agent Wallets on Arc.** The settlement layer is designed around them — one
+  policy-capped USDC wallet per strategy, with global limits, per-service caps and
+  contract allowlists bounding what a strategy can do with capital regardless of what its
+  code attempts. None of it is implemented. Locally a strategy's operator is an ordinary
+  EOA and the vault contract is what bounds it. Anywhere this is described, describe it as
+  intended rather than as built.
 
 ## Phase 2
 

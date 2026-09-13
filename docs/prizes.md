@@ -6,8 +6,11 @@ the constraints each imposes on the build.
 | Layer | Technology | Responsibility |
 |---|---|---|
 | Compute | Chainlink CRE Confidential Workflows | Strategy logic executes inside a hardware-isolated TEE |
-| Settlement | Circle Agent Wallets on Arc | Policy-capped USDC wallet per strategy instance |
 | Distribution | Privy | Investor onboarding, funding, allocation, withdrawal |
+
+Settlement runs on plain USDC vaults on a local chain. **Circle Agent Wallets on Arc are
+out of scope** — the design is written up below because the settlement layer was shaped
+around it, but none of it is built, and nothing in the submission should imply otherwise.
 
 ## Chainlink — CRE Confidential Workflows
 
@@ -44,7 +47,11 @@ the node. This is the compute layer: the strategy *is* a confidential workflow.
   execution is wired.
 - Execution time and memory limits for a workflow that polls a venue on an interval.
 
-## Circle — Agent Wallets on Arc
+## Circle — Agent Wallets on Arc (NOT IMPLEMENTED)
+
+Nothing in this section exists in the code. It records the intended production shape of
+the settlement layer. Today a strategy's operator is an ordinary EOA on a local chain and
+the vault contract is what bounds it.
 
 Arc is Circle's stablecoin-native chain. Agent Wallets are programmable USDC wallets
 built for autonomous agents, which is what a running strategy is.
