@@ -4,6 +4,11 @@
 // Reads are public — the marketplace is public — and everything that touches a specific
 // investor's money requires a session.
 //
+// Performance is quoted from the vault's own settlement log (lib/chain-metrics.ts), not
+// from a table: `PnlApplied` carries the NAV each tick produced and the block dates it, so
+// APY is what the chain can be made to prove. The NAV snapshot table is the fallback for
+// when the node cannot be reached, and falling back is logged.
+//
 // `invest` and `withdraw` are the unusual pair. The browser signs and broadcasts the
 // transaction itself, so all these two are handed is a hash. They fetch the receipt and
 // verify three things before a row is written: the transaction succeeded, it targets this
@@ -34,6 +39,13 @@ import {
 	type PositionRow,
 	type StrategyRow,
 } from '../db/schema.js'
+import {
+	metricsFrom,
+	readVaultsFromChain,
+	sparklineFrom,
+	timeseriesFrom,
+	type VaultReading,
+} from '../lib/chain-metrics.js'
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js'
 import { addAmounts, formatAmount, subAmounts, toBigInt, ZERO } from '../lib/money.js'
 import { requireAuth, requireUser } from '../lib/session.js'
@@ -155,16 +167,22 @@ export async function strategyRoutes(app: FastifyInstance): Promise<void> {
 		const matched = scored.map((entry) => entry.row)
 		const series = navSeriesFor(matched.map((row) => row.id))
 		const investors = investorCounts(matched.map((row) => row.id))
-		const totals = await readTotalsFor(chain, matched, request.log)
+		const [totals, readings] = await Promise.all([
+			readTotalsFor(chain, matched, request.log),
+			chainReadings(matched, request.log),
+		])
 
 		const summaries = scored.map((entry) => ({
 			score: entry.score,
-			summary: toSummary(
-				entry.row,
-				creatorOf(creators, entry.row.creatorId),
-				series.get(entry.row.id) ?? [],
-				totals.get(entry.row.id) ?? EMPTY_TOTALS,
-				investors.get(entry.row.id) ?? 0,
+			summary: withChainMetrics(
+				toSummary(
+					entry.row,
+					creatorOf(creators, entry.row.creatorId),
+					series.get(entry.row.id) ?? [],
+					totals.get(entry.row.id) ?? EMPTY_TOTALS,
+					investors.get(entry.row.id) ?? 0,
+				),
+				readings.get(entry.row.id),
 			),
 		}))
 
@@ -180,7 +198,11 @@ export async function strategyRoutes(app: FastifyInstance): Promise<void> {
 	app.get('/strategies/:slug', async (request): Promise<StrategyDetail> => {
 		const { slug } = slugParams.parse(request.params)
 		const strategy = requireStrategy(slug)
-		return buildDetail(getChainPort(request.log), strategy, request.user?.id ?? null, request.log)
+		const [detail, readings] = await Promise.all([
+			buildDetail(getChainPort(request.log), strategy, request.user?.id ?? null, request.log),
+			chainReadings([strategy], request.log),
+		])
+		return withChainMetrics(detail, readings.get(strategy.id))
 	})
 
 	// ── Series ──────────────────────────────────────────────
@@ -188,7 +210,11 @@ export async function strategyRoutes(app: FastifyInstance): Promise<void> {
 		const { slug } = slugParams.parse(request.params)
 		const { range } = rangeQuery.parse(request.query)
 		const strategy = requireStrategy(slug)
-		return toTimeseries(navSeries(strategy.id, rangeStart(range)))
+		const from = rangeStart(range)
+
+		const reading = (await chainReadings([strategy], request.log)).get(strategy.id)
+		if (reading && reading.series.length > 0) return timeseriesFrom(reading.series, from)
+		return toTimeseries(navSeries(strategy.id, from))
 	})
 
 	app.get(
@@ -254,6 +280,57 @@ export async function strategyRoutes(app: FastifyInstance): Promise<void> {
 	app.post('/strategies/:slug/withdraw', { preHandler: requireAuth }, async (request): Promise<Position> => {
 		return recordTransfer(request, 'withdraw')
 	})
+}
+
+/* ── Chain-derived performance ───────────────────────────── */
+
+/**
+ * Settlement history for a page of strategies, keyed by strategy id, in one batched read.
+ *
+ * A strategy with no vault has nothing to read and is simply absent. A node that cannot be
+ * reached yields an empty map, which leaves every caller on the snapshot-derived numbers —
+ * degraded rather than blank, and loud in the log about which it served.
+ */
+async function chainReadings(
+	rows: readonly StrategyRow[],
+	logger: Logger,
+): Promise<Map<string, VaultReading>> {
+	const vaulted = rows.filter((row) => row.vaultAddress !== null)
+	if (vaulted.length === 0) return new Map()
+
+	try {
+		const byVault = await readVaultsFromChain(
+			vaulted.map((row) => getAddress(row.vaultAddress as Address)),
+			logger,
+		)
+		const byStrategy = new Map<string, VaultReading>()
+		for (const row of vaulted) {
+			const reading = byVault.get((row.vaultAddress ?? '').toLowerCase())
+			if (reading) byStrategy.set(row.id, reading)
+		}
+		return byStrategy
+	} catch (error) {
+		logger.error(
+			{ err: error, slugs: vaulted.map((row) => row.slug) },
+			'could not derive metrics from the chain; falling back to the NAV snapshot table',
+		)
+		return new Map()
+	}
+}
+
+/**
+ * Replaces the snapshot-derived performance on a summary with what the vault's logs say.
+ * The sparkline moves with it so the card's line and its APY are drawn from one series
+ * rather than from two that might disagree.
+ */
+function withChainMetrics<T extends StrategySummary>(summary: T, reading: VaultReading | undefined): T {
+	if (!reading) return summary
+	const sparkline = sparklineFrom(reading.series)
+	return {
+		...summary,
+		metrics: metricsFrom(reading),
+		sparkline: sparkline.length > 0 ? sparkline : summary.sparkline,
+	}
 }
 
 /* ── Listing helpers ─────────────────────────────────────── */
@@ -335,7 +412,7 @@ async function recordTransfer(request: FastifyRequest, kind: 'deposit' | 'withdr
 	)
 	if (!event) {
 		throw badRequest(
-			`transaction ${txHash} contains no ${kind} into the vault for "${slug}" (${vaultAddress})`,
+			`transaction ${txHash} contains no ${kind} against the vault for "${slug}" (${vaultAddress})`,
 		)
 	}
 	if (getAddress(event.investor) !== investor) {
@@ -427,10 +504,10 @@ function applyTransfer(input: ApplyTransferInput): PositionRow {
 			event.kind === 'deposit'
 				? addAmounts(position.shares, shares)
 				: subAmounts(position.shares, shares)
-		const signedBasis =
+		const nextBasis =
 			event.kind === 'deposit'
 				? addAmounts(position.costBasis, assets)
-				: subAmounts(position.costBasis, assets)
+				: basisAfterRedemption(position.costBasis, position.shares, shares)
 
 		// The vault would have reverted a redemption of more shares than the investor holds,
 		// so a negative here means this backend missed an earlier event rather than that the
@@ -457,11 +534,31 @@ function applyTransfer(input: ApplyTransferInput): PositionRow {
 
 		const updated = tx
 			.update(positions)
-			.set({ shares: nextShares, costBasis: signedBasis })
+			.set({ shares: nextShares, costBasis: nextBasis })
 			.where(eq(positions.id, position.id))
 			.returning()
 			.get()
 		if (!updated) throw conflict('the position row disappeared while it was being updated')
 		return updated
 	})
+}
+
+/**
+ * What the shares still held cost, after `redeemed` of `held` were sold.
+ *
+ * A redemption releases the basis those shares carried — `costBasis * redeemed / held` —
+ * rather than the USDC they fetched, so what is left is what the remaining shares were
+ * bought for. Selling out entirely leaves nothing allocated, and `unrealisedPnl`
+ * therefore states the gain on capital still in the strategy rather than a profit already
+ * taken to the wallet.
+ *
+ * The division truncates, which leaves at most one base unit of basis behind on a partial
+ * redemption; a full one is zeroed outright.
+ */
+function basisAfterRedemption(costBasis: string, held: string, redeemed: string): string {
+	const basis = toBigInt(costBasis)
+	const heldShares = toBigInt(held)
+	const redeemedShares = toBigInt(redeemed)
+	if (basis <= 0n || heldShares <= 0n || redeemedShares >= heldShares) return ZERO
+	return (basis - (basis * redeemedShares) / heldShares).toString()
 }

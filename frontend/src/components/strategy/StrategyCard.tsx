@@ -19,6 +19,11 @@ export function StrategyCard({ entry, className }: StrategyCardProps) {
 	const { strategy, ticker, handle, match } = entry
 	const { metrics, verification } = strategy
 	const apy = metrics.apy
+	// A strategy minutes old has no defensible annualised figure, so the card leads with
+	// the fact — return since inception — and falls back to APY once there is history for
+	// it. Both are attested; only one of them is a projection.
+	const headline = apy ?? metrics.totalReturn
+	const headlineLabel = apy === null ? 'SINCE INCEPTION' : 'APY'
 
 	return (
 		<article
@@ -60,16 +65,16 @@ export function StrategyCard({ entry, className }: StrategyCardProps) {
 				<div className="min-w-0">
 					<p className="type-label-caps text-fg-muted">Attested return</p>
 					<p className="mt-1 flex items-baseline gap-1.5">
-						<span className={cn('type-metric-display', apy === null ? 'text-fg-muted' : signTextClass(apy))}>
-							{apy === null ? EM_DASH : formatPercent(apy)}
+						<span className={cn('type-metric-display', headline === null ? 'text-fg-muted' : signTextClass(headline))}>
+							{headline === null ? EM_DASH : formatPercent(headline)}
 						</span>
-						<span className="type-label-caps text-fg-muted">APY</span>
+						<span className="type-label-caps text-fg-muted">{headlineLabel}</span>
 					</p>
 				</div>
 				{strategy.sparkline.length > 1 ? (
 					<Sparkline
 						values={strategy.sparkline}
-						tone={apy !== null && apy < 0 ? 'down' : undefined}
+						tone={headline !== null && headline < 0 ? 'down' : undefined}
 						className="shrink-0"
 					/>
 				) : (
