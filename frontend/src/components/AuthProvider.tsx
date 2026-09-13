@@ -17,8 +17,14 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-/** The one route reachable without a session. */
-const PUBLIC_PATH = '/login'
+const SIGN_IN_PATH = '/login'
+
+/**
+ * Reachable without a session. The root is public because a signed-out visitor is
+ * shown the marketing landing page there; a signed-in one gets the marketplace at
+ * the same URL.
+ */
+const PUBLIC_PATHS = new Set([SIGN_IN_PATH, '/'])
 
 export function AuthProvider({ children }: { children: ReactNode }) {
 	const [status, setStatus] = useState<AuthStatus>('loading')
@@ -54,8 +60,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 	useEffect(() => {
 		if (status === 'loading') return
-		if (status === 'anonymous' && pathname !== PUBLIC_PATH) router.replace(PUBLIC_PATH)
-		if (status === 'authenticated' && pathname === PUBLIC_PATH) router.replace('/')
+		if (status === 'anonymous' && !PUBLIC_PATHS.has(pathname)) router.replace(SIGN_IN_PATH)
+		if (status === 'authenticated' && pathname === SIGN_IN_PATH) router.replace('/')
 	}, [status, pathname, router])
 
 	const signIn = useCallback(
@@ -73,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		setToken(null)
 		setUser(null)
 		setStatus('anonymous')
-		router.replace(PUBLIC_PATH)
+		router.replace('/')
 	}, [router])
 
 	const value = useMemo(() => ({ status, user, signIn, signOut }), [status, user, signIn, signOut])

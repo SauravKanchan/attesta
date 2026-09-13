@@ -15,6 +15,9 @@
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "node --env-file-if-exists=.env --import tsx src/db/migrate.ts",
 		"db:seed": "node --env-file-if-exists=.env --import tsx src/db/seed.ts",
+		"chain:abis": "node --env-file-if-exists=.env --import tsx src/chain/generate-abis.ts",
+		"verify:chain": "node --env-file-if-exists=.env --import tsx src/chain/verify.ts",
+		"verify:oracle": "node --env-file-if-exists=.env --import tsx src/oracle/verify.ts",
 		"test": "node --import tsx --test test/*.test.ts"
 	},
 	"dependencies": {

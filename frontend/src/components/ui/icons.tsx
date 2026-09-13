@@ -155,3 +155,49 @@ export function ExternalIcon(props: IconProps) {
 		</Icon>
 	)
 }
+
+export function CopyIcon(props: IconProps) {
+	return (
+		<Icon {...props}>
+			<rect x="5.75" y="5.75" width="7.5" height="7.5" rx="1" />
+			<path d="M10.25 5.75V3.25a.5.5 0 0 0-.5-.5h-6.5a.5.5 0 0 0-.5.5v6.5a.5.5 0 0 0 .5.5h2.5" />
+		</Icon>
+	)
+}
+
+export function ArrowRightIcon(props: IconProps) {
+	return (
+		<Icon {...props}>
+			<path d="M2.75 8h10.5M9 3.75 13.25 8 9 12.25" />
+		</Icon>
+	)
+}
+
+export function LinkIcon(props: IconProps) {
+	return (
+		<Icon {...props}>
+			<path d="M6.25 9.75 9.75 6.25" />
+			<path d="M7.5 4.5 8.75 3.25a2.475 2.475 0 1 1 3.5 3.5L11 8" />
+			<path d="M8.5 11.5 7.25 12.75a2.475 2.475 0 1 1-3.5-3.5L5 8" />
+		</Icon>
+	)
+}
+
+export function ChipIcon(props: IconProps) {
+	return (
+		<Icon {...props}>
+			<rect x="4.25" y="4.25" width="7.5" height="7.5" rx="1" />
+			<rect x="6.75" y="6.75" width="2.5" height="2.5" rx="0.5" />
+			<path d="M6.25 1.75v2.5M9.75 1.75v2.5M6.25 11.75v2.5M9.75 11.75v2.5M1.75 6.25h2.5M1.75 9.75h2.5M11.75 6.25h2.5M11.75 9.75h2.5" />
+		</Icon>
+	)
+}
+
+export function LockIcon(props: IconProps) {
+	return (
+		<Icon {...props}>
+			<rect x="3.25" y="7" width="9.5" height="6.75" rx="1" />
+			<path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
+		</Icon>
+	)
+}

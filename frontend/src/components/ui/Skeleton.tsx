@@ -1,11 +1,12 @@
+import type { HTMLAttributes } from 'react'
 import { cn } from '@/lib/cn'
 
-export interface SkeletonProps {
+export interface SkeletonProps extends HTMLAttributes<HTMLDivElement> {
 	className?: string
 }
 
-export function Skeleton({ className }: SkeletonProps) {
-	return <div aria-hidden="true" className={cn('sheen h-4 rounded-xs', className)} />
+export function Skeleton({ className, ...rest }: SkeletonProps) {
+	return <div aria-hidden="true" className={cn('sheen h-4 rounded-xs', className)} {...rest} />
 }
 
 export interface SkeletonTextProps {

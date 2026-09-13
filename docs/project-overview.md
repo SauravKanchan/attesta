@@ -166,6 +166,33 @@ authorisation never requires the plaintext. Creators need no CRE org membership.
 | Required change | The toolkit's exported `encrypt()` hardcodes an empty label. CRE requires the label to be the owner address left-padded to 32 bytes (12 zero bytes + 20-byte address). Vendor `tdh2.js` and pass that label to the internal `tdh2Encrypt`. |
 | Why a relay | The gateway returns no `Access-Control-Allow-Origin` header and its OPTIONS preflight fails, so a browser cannot POST to it directly. |
 
+#### Phase 1 locally — the `local-dev` scheme
+
+Nothing above runs against a local anvil chain: the Vault DON is a Chainlink service, and
+the gateway is not reachable from a machine with no CRE deployment. So phase 1 ships the
+same flow with a different cipher, and says so on the page.
+
+`EncryptedSecret.scheme` in [../shared/types.ts](../shared/types.ts) is the seam. Locally
+it carries `local-dev`; in production it carries `tdh2-p256-aesgcm`. Everything either
+side of the cipher is already the production path — the creator's browser encrypts before
+anything is sent, the backend stores ciphertext in a table with no plaintext column, and
+`POST /submissions/:id/secrets` accepts nothing else.
+
+| Piece | `local-dev` | `tdh2-p256-aesgcm` |
+|---|---|---|
+| Where it runs | `frontend/src/lib/secrets.ts`, in the browser | Vendored `tdh2.js`, in the browser |
+| Key | 32 random bytes generated in the browser, kept in its own `localStorage`, HKDF-derived per submission | The Vault DON's P256 threshold public key, fetched through the relay |
+| Cipher | AES-256-GCM, random 96-bit IV | AES-256-GCM with the key TDH2-wrapped |
+| Envelope | `local-dev.v1.<iv>.<ciphertext>`, base64 | `{TDH2Ctxt, SymCtxt, Nonce}` |
+| Who can decrypt | That browser, and nothing else | A threshold of Vault DON nodes, releasing only into an attested enclave |
+
+Swapping schemes replaces one function — `encryptValue` — and the scheme tag it writes.
+
+The honest limitation, which the create screen states rather than glosses: under
+`local-dev` the key never leaves the creator's browser, so no enclave can read the
+parameters either. It reproduces the platform's *ignorance* of the plaintext, which is
+what the UI claims, and not the enclave's *access* to it, which only TDH2 delivers.
+
 #### Who holds what
 
 | Item | Platform sees | Backed by |

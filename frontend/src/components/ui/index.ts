@@ -1,15 +1,30 @@
-export { Button } from '@/components/ui/Button'
-export type { ButtonProps, ButtonSize, ButtonVariant } from '@/components/ui/Button'
+/**
+ * The shared component kit. Everything a page is allowed to reach for lives here,
+ * so a screen never hand-rolls a border, a figure or a hash again.
+ *
+ * Chart, Sparkline, VerificationBadge, EnclaveStatus and PageHeader are composed of
+ * these primitives and sit a level up in `components/`; they are re-exported here so
+ * a page has one import path for the whole kit.
+ */
+
+export { Button, LinkButton, buttonClassName } from '@/components/ui/Button'
+export type { ButtonProps, ButtonSize, ButtonVariant, LinkButtonProps } from '@/components/ui/Button'
 export { Card, CardBody, CardFooter, CardHeader } from '@/components/ui/Card'
 export type { CardHeaderProps, CardProps } from '@/components/ui/Card'
+export { CopyableHash } from '@/components/ui/CopyableHash'
+export type { CopyableHashProps } from '@/components/ui/CopyableHash'
 export { EmptyState } from '@/components/ui/EmptyState'
 export type { EmptyStateProps } from '@/components/ui/EmptyState'
 export { Input, Textarea } from '@/components/ui/Input'
 export type { InputProps, TextareaProps } from '@/components/ui/Input'
 export { Modal } from '@/components/ui/Modal'
 export type { ModalProps } from '@/components/ui/Modal'
+export { MoneyValue } from '@/components/ui/MoneyValue'
+export type { MoneyValueProps } from '@/components/ui/MoneyValue'
 export { MultiSelect } from '@/components/ui/MultiSelect'
 export type { MultiSelectProps } from '@/components/ui/MultiSelect'
+export { PercentChange } from '@/components/ui/PercentChange'
+export type { PercentChangeProps } from '@/components/ui/PercentChange'
 export { SegmentedControl } from '@/components/ui/SegmentedControl'
 export type { SegmentedControlProps, SegmentedOption } from '@/components/ui/SegmentedControl'
 export { Select } from '@/components/ui/Select'
@@ -27,4 +42,16 @@ export type { TabItem, TabsProps } from '@/components/ui/Tabs'
 export { Tag } from '@/components/ui/Tag'
 export type { TagProps, TagTone } from '@/components/ui/Tag'
 export { ToastProvider, useToast } from '@/components/ui/Toast'
+export { Wordmark } from '@/components/ui/Wordmark'
+export type { WordmarkProps } from '@/components/ui/Wordmark'
 export type { Toast, ToastInput, ToastTone } from '@/components/ui/Toast'
+
+export { Chart } from '@/components/Chart'
+export type { ChartEvent, ChartProps } from '@/components/Chart'
+export { EnclaveStatus } from '@/components/EnclaveStatus'
+export { PageHeader } from '@/components/PageHeader'
+export type { PageHeaderProps } from '@/components/PageHeader'
+export { Sparkline } from '@/components/Sparkline'
+export type { SparklineProps } from '@/components/Sparkline'
+export { VerificationBadge } from '@/components/VerificationBadge'
+export type { VerificationBadgeProps } from '@/components/VerificationBadge'
