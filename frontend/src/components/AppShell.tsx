@@ -13,6 +13,7 @@ import { Wordmark } from '@/components/ui/Wordmark'
 import { truncateAddress } from '@/lib/format'
 import { writeSessionHint } from '@/lib/session-hint'
 import type { SessionHint } from '@/lib/session-hint'
+import type { User } from '@/lib/types'
 
 const COLLAPSE_STORAGE_KEY = 'attesta.sidebar.collapsed'
 
@@ -20,9 +21,26 @@ const COLLAPSE_STORAGE_KEY = 'attesta.sidebar.collapsed'
  * Two characters that tell one account from another. A wallet-derived username starts
  * `0x`, which every account shares, so the prefix is dropped before taking them.
  */
+/** A username the user never set is just their address, and two hex digits read as a
+ *  number rather than a monogram. Those get a glyph instead. */
+function isAddressDerived(username: string | undefined): boolean {
+	return /^@?0x/i.test((username ?? '').trim())
+}
+
 function initials(username: string | undefined): string {
-	const name = (username ?? '').trim().replace(/^@/, '').replace(/^0x/i, '')
-	return name === '' ? '?' : name.slice(0, 2).toUpperCase()
+	const name = (username ?? '').trim().replace(/^@/, '')
+	if (name === '' || isAddressDerived(name)) return ''
+	return name.slice(0, 2).toUpperCase()
+}
+
+function WalletGlyph({ className }: { className?: string }) {
+	return (
+		<svg className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+			<rect x="1.5" y="3.5" width="13" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+			<path d="M1.5 6.5h13" stroke="currentColor" strokeWidth="1.3" />
+			<circle cx="11.5" cy="9.5" r="1" fill="currentColor" />
+		</svg>
+	)
 }
 
 interface NavItem {
@@ -181,21 +199,9 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
 			<div className="border-t border-hairline p-2">
 				<div className={cn('flex items-center gap-2', collapsed && 'justify-center')}>
 					<span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-hairline-strong bg-surface-2 type-code-sm text-fg-secondary">
-						{initials(user?.username)}
+						{initials(user?.username) || <WalletGlyph className="size-3.5" />}
 					</span>
-					{collapsed ? null : (
-						<div className="min-w-0 flex-1">
-							<p className="truncate type-body-md text-fg" title={user?.username ?? undefined}>
-								{user?.username ?? 'Signed in'}
-							</p>
-							<p
-								className="truncate type-code-sm text-fg-muted"
-								title={user?.walletAddress ?? undefined}
-							>
-								{truncateAddress(user?.walletAddress)}
-							</p>
-						</div>
-					)}
+					{collapsed ? null : <SidebarIdentity user={user} />}
 					{collapsed ? null : (
 						<button
 							type="button"
@@ -221,6 +227,28 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
 				) : null}
 			</div>
 		</aside>
+	)
+}
+
+/**
+ * An account with no chosen username is labelled by its own address, so drawing the
+ * username over the address printed the same string on both lines. The address line is
+ * only worth its row when it says something the line above it does not.
+ */
+function SidebarIdentity({ user }: { user: User | null }) {
+	const address = truncateAddress(user?.walletAddress)
+	const named = user?.username !== undefined && !isAddressDerived(user.username)
+	return (
+		<div className="min-w-0 flex-1">
+			<p className="truncate type-code-sm text-fg" title={user?.walletAddress ?? undefined}>
+				{named ? user.username : address}
+			</p>
+			{named ? (
+				<p className="truncate type-code-sm text-fg-muted" title={user?.walletAddress ?? undefined}>
+					{address}
+				</p>
+			) : null}
+		</div>
 	)
 }
 
