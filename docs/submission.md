@@ -13,7 +13,7 @@ state, retype from here.
 | Project details | Name, category, emoji, demo link, short description, description, how it's made — all typed. **Not saved**: the form refuses to save until a GitHub repo is selected. |
 | Images | Not started — needs screenshots |
 | Tech stack | Not started |
-| Select prizes | Not started — Chainlink, Circle, Privy |
+| Select prizes | Not started — **Chainlink and Privy only**. Circle is not built; see below. |
 | Video | Not started — needs a 2–4 min, 720p+, clear-audio recording |
 | Future | Not started |
 | Final | Blocked on the above |
@@ -69,19 +69,27 @@ no read-back API — holding our own keys does not recover them.
 For the investor it looks like a passive fund. Sign in with Privy — social login, no seed
 phrase, an embedded wallet created for you. Browse strategies, read how each one works,
 check its returns, APY and drawdown. Allocate USDC, watch the position move, withdraw. Each
-strategy's capital sits in its own vault with ERC4626 share accounting, traded by a Circle
-Agent Wallet on Arc whose spending policy caps what the strategy can do with the money
-regardless of what its code attempts.
+strategy's capital sits in its own vault with ERC4626 share accounting, settled by the
+strategy's own operator account. The vault's arithmetic is what bounds that operator: it
+can apply a profit or loss and record a trade, but it cannot withdraw an investor's
+capital. That is a property of the contract rather than a promise.
 
 What makes it more than a dashboard is that nothing on the page is written down anywhere.
-APY is not a field. It is computed from NAV snapshots the scheduler wrote, which came from
-pricing the strategy's own weight decisions against a deterministic price series. A
-strategy that picks badly shows a negative APY because it lost money, not because a fixture
-says -8.4.
+Return is not a field. It is derived from the vault's own settlement log on chain — every
+`PnlApplied` event is a NAV observation dated by its block — and those settlements came
+from pricing the strategy's own weight decisions against a deterministic price series. A
+strategy that picks badly shows a negative return because it lost money, not because a
+fixture says -8.4.
+
+Annualised APY is reported as unavailable until there is enough history to annualise
+honestly. Compounding a twenty-minute observation over a year is an artefact, not a
+projection, so the card leads with return since inception instead — a fact at any span.
 
 We are also explicit about the limits, because a verifiability claim is only worth what its
-weakest link is. The Agent Wallet is Circle-managed rather than enclave-generated, so Circle
-is in the custody trust set. Vault secrets are scoped to the platform owner rather than to a
+weakest link is. Settlement is the weakest: a strategy's operator key is platform-held
+rather than born inside the enclave, so the attestation covers what was decided far better
+than it covers who could move money. The vault contract bounds the damage rather than the
+attestation doing it. Vault secrets are scoped to the platform owner rather than to a
 single workflow, so isolation between creators rests on every deployed workflow being
 enumerable and hash-checkable rather than on the Vault enforcing it. Phase 1 does not audit
 strategy code — "verified" means "this exact code produced these results", not "this code is
@@ -136,10 +144,12 @@ FRONTEND — Next.js 15 App Router, React 19, Tailwind v4, CodeMirror 6, Rechart
 Creators write strategies in an in-browser editor. Investors get charts driven entirely by
 NAV series the scheduler produced.
 
-PRIVY + CIRCLE — the two wallet systems, deliberately not one.
+PRIVY — the investor-facing surface.
 Investors are humans who need consumer onboarding: social login, recovery, no key
-management. Strategies are autonomous agents that need programmatic, policy-capped wallets
-with no human in the loop. Different actors, different trust models.
+management. A strategy is an autonomous agent settling its own vault, which needs a
+programmatic account rather than a consumer one. Different actors, different trust models,
+so deliberately two wallet systems rather than one — though only the investor half is
+integrated today.
 
 --- The parts worth calling out ---
 
@@ -190,14 +200,21 @@ running successfully until then. Evidence here is CRE CLI simulation.
 
 ## Prize tracks
 
-Submit to all three partner tracks — the integration constraint is exactly these three:
+Submit to **two** tracks. Both are backed by working code.
 
-- **Chainlink** — CRE Confidential Workflows. Evidence: CLI simulation (accepted for the
-  ETHOnline prize), deployed workflow on `zone-a`, nine-stage build/simulate pipeline.
-- **Circle** — Agent Wallets on Arc. Policy-capped USDC wallet per strategy instance.
+- **Chainlink** — CRE Confidential Workflows. Evidence: real `cre workflow build` and
+  `cre workflow simulate` runs reading a Vault DON secret inside the enclave and returning
+  a signed decision, a deployed workflow on `zone-a`, and the nine-stage build/simulate
+  pipeline every submitted strategy passes before it can be listed.
 - **Privy** — embedded wallets, social login, the whole investor-facing surface.
 
-**[NEEDS YOU — confirm all three are sponsors at this event and which tracks are open]**
+**Do not enter the Circle track.** Agent Wallets on Arc shaped the settlement design and
+none of it is built — a strategy's operator is an ordinary account and the vault contract
+is what bounds it. A track entered with no implementation behind it reads worse to a judge
+than not entering, and claiming a live integration that does not exist is a
+disqualification risk. See [prizes.md](prizes.md), which marks that layer NOT IMPLEMENTED.
+
+**[NEEDS YOU — confirm both are sponsors at this event and which tracks are open]**
 
 ## Team
 
