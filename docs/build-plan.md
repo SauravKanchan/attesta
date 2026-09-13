@@ -51,13 +51,52 @@ what makes the attested-decision story coherent.
 **StrategyRegistry** — `register(bytes32 strategyId, address vault, bytes32 binaryHash)`.
 Puts the workflow measurement on-chain so the verifiability claim has a public anchor.
 
+## Authentication and signing
+
+The user's private key never reaches the server, and the backend never signs on a user's
+behalf. This is deliberate: Privy's embedded wallet gives the browser a signer, so if the
+backend held keys now, swapping Privy in later would mean rewriting the whole money path
+rather than replacing one function.
+
+**Sign in** proves control of an address:
+
+```
+browser                                     backend
+  paste private key (or pick an anvil test account)
+  derive address locally
+  POST /auth/challenge {address}  ─────────▶  issue a nonce, store it
+  sign the message with viem                  ◀─ {message, nonce}
+  POST /auth/verify {address, signature} ──▶  recoverMessageAddress, compare, issue a session
+```
+
+The key is held in browser memory, persisted to `localStorage` only because this is a
+local dev build, and the login screen says so plainly. Replacing it with Privy means
+replacing where the signer comes from — the challenge/verify exchange is unchanged.
+
+**Investing and withdrawing** are signed in the browser too:
+
+```
+browser: usdc.approve(vault, amount) -> wait receipt
+browser: vault.deposit(amount)       -> wait receipt
+browser: POST /strategies/:slug/invest {txHash}
+backend: fetch the receipt, parse the Deposited event, verify it came from the caller's
+         address and targets this strategy's vault, then record the position
+```
+
+The backend records what the chain says happened rather than what the client claims, so a
+forged or replayed hash records nothing. The same shape applies to withdrawal.
+
+Gas: anvil accounts are pre-funded. A wallet created by pasting an unfunded key is topped
+up from the deployer account through `POST /wallet/faucet`, which also mints USDC.
+
 ## API
 
 Base `/api`. Session via `Authorization: Bearer <token>`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/auth/login` | `{username}` -> `Session`. Creates the user and funds an anvil wallet on first sight. |
+| POST | `/auth/challenge` | `{address}` -> `LoginChallenge`. Never accepts a private key. |
+| POST | `/auth/verify` | `{address, signature}` -> `Session` |
 | GET | `/auth/me` | `User` |
 | GET | `/strategies` | `ListStrategiesQuery` -> `ListStrategiesResponse`. Fuzzy search, filters, sort. |
 | GET | `/strategies/:slug` | `StrategyDetail` (includes caller's position when held) |
@@ -66,10 +105,11 @@ Base `/api`. Session via `Authorization: Bearer <token>`.
 | GET | `/strategies/:slug/trades` | `Trade[]` |
 | GET | `/strategies/:slug/executions` | `Execution[]` |
 | GET | `/strategies/:slug/source` | raw TypeScript |
-| POST | `/strategies/:slug/invest` | `{amount}` -> approve + `vault.deposit`, returns `Position` |
-| POST | `/strategies/:slug/withdraw` | `{shares}` -> `vault.withdraw`, returns `Position` |
+| POST | `/strategies/:slug/invest` | `{txHash}` -> verify the receipt on chain, record the `Position` |
+| POST | `/strategies/:slug/withdraw` | `{txHash}` -> verify the receipt on chain, update the `Position` |
 | GET | `/portfolio` | `Portfolio` |
-| POST | `/wallet/faucet` | mint MockUSDC to the caller |
+| POST | `/wallet/faucet` | mint MockUSDC and top up gas for the caller |
+| GET | `/chain/config` | contract addresses, chain id and RPC URL, so the browser can build transactions |
 | POST | `/submissions` | create a `SubmissionDraft` |
 | PATCH | `/submissions/:id` | update code and metadata |
 | POST | `/submissions/:id/secrets` | `EncryptedSecret[]` — ciphertext only |

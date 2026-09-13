@@ -17,7 +17,9 @@ export type StrategyStatus = 'draft' | 'checking' | 'simulating' | 'live' | 'fai
 
 export interface User {
 	id: string
+	/** Display name. Defaults to a short form of the address until the user sets one. */
 	username: string
+	/** The user's identity. Checksummed. */
 	walletAddress: string
 	createdAt: string
 }
@@ -25,6 +27,27 @@ export interface User {
 export interface Session {
 	token: string
 	user: User
+}
+
+/**
+ * Sign-in proves control of an address by signing a server nonce. The private key stays
+ * in the browser and is never transmitted — the same shape Privy will slot into, where
+ * the embedded wallet supplies the signer instead of a pasted key.
+ */
+export interface LoginChallenge {
+	address: string
+	nonce: string
+	/** The exact string the client must sign. */
+	message: string
+	expiresAt: string
+}
+
+/**
+ * A transaction the browser signed and broadcast itself. The backend verifies the receipt
+ * on chain before recording anything, so it trusts the chain rather than the client.
+ */
+export interface SubmittedTx {
+	txHash: string
 }
 
 // ─── Strategy ───────────────────────────────────────────────
@@ -105,6 +128,8 @@ export interface Position {
 export interface PortfolioSummary {
 	totalValue: string
 	totalInvested: string
+	/** Native gas balance, so the UI can warn before a transaction fails. */
+	gasBalance: string
 	allTimePnl: string
 	/** Percentage points, not a fraction: 42 = +42%. Unlike `totalReturn`, which is a fraction. */
 	allTimePnlPct: number
