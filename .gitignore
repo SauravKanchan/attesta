@@ -22,3 +22,30 @@ build/
 # CRE deploy artifact
 binary.wasm.br.b64
 .playwright-mcp/
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/lib/
+
+# Local database and chain state
+backend/data/
+*.db
+*.db-shm
+*.db-wal
+anvil.log
+deployments.local.json
+
+# Logs
+*.log
+logs/
+
+# The global gitignore excludes [Ss]cripts; this project keeps script directories.
+!**/scripts/
+!**/scripts/**
