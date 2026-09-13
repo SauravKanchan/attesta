@@ -18,6 +18,8 @@
 		"chain:abis": "node --env-file-if-exists=.env --import tsx src/chain/generate-abis.ts",
 		"verify:chain": "node --env-file-if-exists=.env --import tsx src/chain/verify.ts",
 		"verify:oracle": "node --env-file-if-exists=.env --import tsx src/oracle/verify.ts",
+		"verify:loop": "DATABASE_URL=${DATABASE_URL:-./data/verify-loop.db} ORACLE_URL=${ORACLE_URL:-http://127.0.0.1:4055/api/oracle/prices} node --env-file-if-exists=.env --import tsx src/scheduler/verify.ts",
+		"tick": "node --env-file-if-exists=.env --import tsx src/scheduler/tick-once.ts",
 		"test": "node --import tsx --test test/*.test.ts"
 	},
 	"dependencies": {

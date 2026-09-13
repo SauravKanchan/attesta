@@ -1,68 +1,22 @@
-// Wiring the ports onto the real chain and oracle modules.
+// Wiring the tick loop's ports onto the real modules.
 //
-// The tick loop and the publish step are written against interfaces so they can
-// be driven against a fake; this is the one file that knows the concrete
-// modules exist. The entry point calls createScheduler(defaultDeps()) and the
-// submission route calls publishSubmission({ chain: chainPort(), ... }).
+// The oracle adapter lives here because the shape it has to produce — seconds,
+// newest snapshot separate from history — belongs to the tick loop rather than
+// to the oracle. The chain adapter lives with the chain layer, in
+// backend/src/chain/port.ts, and is re-exported so a caller still wires one
+// module rather than two.
 
-import type { Address } from 'viem'
-import * as chain from '../chain/index.js'
+import { createChainPort } from '../chain/port.js'
 import * as oracleModule from '../oracle/index.js'
 import { consoleLogger, type ChainPort, type Logger } from '../strategy/ports.js'
 import { schedulerConfig } from './config.js'
 import type { OraclePort, OracleSnapshot } from './ports.js'
 import type { TickDeps } from './tick.js'
 
-/** The vault, registry and wallet calls the strategy subsystem needs, as one object. */
-export function chainPort(): ChainPort {
-	return {
-		async deployVault({ name, operator }) {
-			const deployed = await chain.vault.deployVault(name, operator)
-			return { vaultAddress: deployed.address, txHash: deployed.txHash }
-		},
+export { platformAddress } from '../chain/port.js'
 
-		async fundReserve({ vaultAddress, amount }) {
-			// The vault pulls the USDC, so the platform float has to approve it first.
-			await chain.usdc.ensureAllowance(vaultAddress, amount, chain.deployerAccount)
-			return { txHash: await chain.vault.fundReserve(vaultAddress, amount) }
-		},
-
-		async registerStrategy({ strategyId, vaultAddress, binaryHash, creator }) {
-			const txHash = await chain.registry.register({
-				strategyId,
-				vault: vaultAddress,
-				binaryHash,
-				creator,
-			})
-			return { txHash }
-		},
-
-		isStrategyRegistered: (strategyId) => chain.registry.isRegistered(strategyId),
-
-		async fundGas({ address, minWei }) {
-			const txHash = await chain.wallets.ensureGas(address, { minimum: minWei })
-			return txHash === null ? null : { txHash }
-		},
-
-		readVault: (vaultAddress) => chain.vault.vaultTotals(vaultAddress),
-
-		async applyPnl({ vaultAddress, operatorKey, delta }) {
-			const account = chain.wallets.accountFromKey(operatorKey)
-			const result = await chain.vault.applyPnl(vaultAddress, delta, account)
-			return { txHash: result.txHash }
-		},
-
-		async recordTrade({ vaultAddress, operatorKey, pair, isBuy, size, price, pnl }) {
-			const account = chain.wallets.accountFromKey(operatorKey)
-			const txHash = await chain.vault.recordTrade(
-				vaultAddress,
-				{ pair, isBuy, size, price, pnl },
-				account,
-			)
-			return { txHash }
-		},
-	}
-}
+/** The concrete ChainPort, over the viem clients in backend/src/chain/. */
+export const chainPort = (): ChainPort => createChainPort()
 
 /**
  * The oracle module carries timestamps in milliseconds and the strategy contract
@@ -103,5 +57,3 @@ export function defaultDeps(logger: Logger = consoleLogger): TickDeps {
 	return { chain: chainPort(), oracle: oraclePort(), logger }
 }
 
-/** The address the platform float is held by, for a caller that needs to fund something. */
-export const platformAddress = (): Address => chain.deployerAccount.address

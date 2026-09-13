@@ -51,6 +51,31 @@ what makes the attested-decision story coherent.
 **StrategyRegistry** — `register(bytes32 strategyId, address vault, bytes32 binaryHash)`.
 Puts the workflow measurement on-chain so the verifiability claim has a public anchor.
 
+### Vault behaviours callers must handle
+
+None of these are visible in the ABI, and each one is easy to hit from the scheduler.
+
+| Behaviour | What reverts | What the caller must do |
+|---|---|---|
+| A gain with no depositors | `applyPnl(+x)` reverts `NoSharesOutstanding()` when `totalShares == 0` — a gain with no owner would sit in managed assets until the next depositor, who mints 1:1 against a zero supply and would redeem the whole stranded amount | Skip the settlement for that tick. The strategy still decides, still records its trades and still writes a NAV snapshot, so a strategy nobody has funded is visibly running rather than silently absent |
+| A gain larger than the buffer | `applyPnl(+x)` reverts `ReserveExhausted(gain, reserve)` — the vault refuses to promise value it cannot pay | Prefund the reserve with `fundReserve` at publish time, and cap a tick's delta at the reserve rather than losing the whole tick to a revert |
+| A loss larger than the book | `applyPnl(-x)` reverts `LossExceedsManagedAssets(loss, managed)` | Cap the loss at `totalManagedAssets` |
+| Settling from the wrong account | `applyPnl` and `recordTrade` revert `NotOperator()` | Sign with the strategy's agent wallet, and top its gas up before the tick |
+| An empty vault's share price | `navPerShare()` returns par (1e6) whenever `totalShares == 0`, rather than dividing by zero | Read NAV as a claim per share, not as evidence a strategy has capital; `totalShares` is what says whether it does |
+
+`fundReserve` pulls the USDC, so the platform float has to hold the amount and have approved
+the vault for it first.
+
+### The strategy id on-chain
+
+The registry keys on `bytes32` and a strategy's platform id is a uuid, so the id is hashed:
+`keccak256(utf8Bytes(strategyId))`, in `backend/src/lib/strategy-id.ts` and nowhere else.
+The chain layer takes that key already hashed — `ChainPort.registerStrategy` and
+`isStrategyRegistered` both accept the bytes32 — because a client that hashed a raw id
+internally would hash a second time whenever the caller had reasonably hashed it first, and
+anchor the strategy under `keccak(keccak(id))`: a key nothing looks up, with nothing
+anywhere to report it.
+
 ## Authentication and signing
 
 The user's private key never reaches the server, and the backend never signs on a user's
@@ -180,6 +205,14 @@ One tick loop per live strategy, default 60s. Each tick: refresh the oracle, run
 `cre workflow simulate` for that strategy, parse the decision, price it, send
 `applyPnl` and `recordTrade`, snapshot NAV, write an `Execution` row.
 
+`backend/src/services.ts` is the composition root: it builds the one `ChainPort` (over
+`backend/src/chain/`) and the one `OraclePort`, hands both to the scheduler, and is called
+from the entry point after `listen` — the enclave fetches prices over HTTP from this same
+process, so the oracle route has to be answering before the first tick can complete. The
+loop starts unless `SCHEDULER_ENABLED=false`. One tick can be driven by hand with
+`npm run tick -- <slug>`, and the whole loop — publish, deposit, four ticks, metrics — is
+proved end to end by `npm run verify:loop`.
+
 `cre workflow simulate` fires a cron trigger once and exits — the CLI has no scheduled
 mode and rejects `--listen` for cron — so the scheduler owns the interval. Deployed CRE
 workflows are scheduled by the DON instead; this is the local stand-in.
@@ -194,5 +227,6 @@ and swaps in at the same seam: `EncryptedSecret.scheme`.
 
 ## Out of scope locally
 
-Circle Agent Wallets (no local runtime), Privy (username auth stands in), live CRE
+Circle Agent Wallets (no local runtime), Privy (a pasted key supplies the browser's
+signer in its place, behind the same challenge/verify exchange), live CRE
 deployment (blocked by a platform regression — see [chainlink/SETUP.md](../chainlink/SETUP.md)).

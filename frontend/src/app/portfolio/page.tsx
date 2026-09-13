@@ -79,8 +79,8 @@ export default function PortfolioPage() {
 			const result = await requestFaucet()
 			toast({
 				tone: 'success',
-				title: 'USDC minted',
-				description: `Your balance is now ${formatUsdc(result.availableUsdc)} USDC.`,
+				title: 'Wallet funded',
+				description: `${formatUsdc(result.minted)} USDC minted. Your balance is now ${formatUsdc(result.usdcBalance)} USDC, with ${result.gasBalance} ETH for gas.`,
 			})
 			await load()
 		} catch (caught) {

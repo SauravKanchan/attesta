@@ -18,7 +18,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
-import { keccak256, toBytes, type Address, type Hex } from 'viem'
+import type { Address, Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import {
 	allPassed,
@@ -36,17 +36,19 @@ import {
 } from '../db/schema.js'
 import { badRequest, conflict, notFound } from '../lib/errors.js'
 import { toBigInt } from '../lib/money.js'
+import { toStrategyId } from '../lib/strategy-id.js'
 import { strategyConfig } from './config.js'
 import { consoleLogger, type ChainPort, type Logger } from './ports.js'
 import { discoverSecretIds } from './secrets.js'
 import { ensureWorkflow, moveWorkspace, openWorkspace, slugify, writeMeta } from './workspace.js'
 
 /**
- * The identifier the registry is keyed by. keccak256 of the platform id, so
+ * The identifier the registry is keyed by: keccak256 of the platform id, so
  * anyone holding a strategy's public id can find its anchor without a lookup
- * table.
+ * table. Re-exported from lib/strategy-id.ts rather than recomputed, because the
+ * chain layer keys on the very same function.
  */
-export const onChainStrategyId = (strategyId: string): Hex => keccak256(toBytes(strategyId))
+export { toStrategyId as onChainStrategyId } from '../lib/strategy-id.js'
 
 export type PublishStepName =
 	| 'strategy-row'
@@ -68,6 +70,8 @@ export interface PublishStep {
 
 export interface PublishResult {
 	strategyId: string
+	/** The bytes32 the registry anchored this strategy under. */
+	onChainStrategyId: Hex
 	slug: string
 	vaultAddress: Address
 	agentWalletAddress: Address
@@ -232,17 +236,19 @@ async function publish(options: PublishOptions): Promise<PublishResult> {
 	}
 
 	// ── 5 registry ──────────────────────────────────────────────
+	// Hashed exactly once, here, and passed as bytes32 from this point on.
+	const registryKey = toStrategyId(strategy.id)
 	const binaryHash = strategy.binaryHash ?? submission.binaryHash
 	const creator = creatorAddress(db, strategy.creatorId)
-	if (await chain.isStrategyRegistered(strategy.id)) {
+	if (await chain.isStrategyRegistered(registryKey)) {
 		steps.push({
 			name: 'registry',
 			status: 'skipped',
-			detail: `already anchored as ${onChainStrategyId(strategy.id)}`,
+			detail: `already anchored as ${registryKey}`,
 		})
 	} else {
 		const receipt = await chain.registerStrategy({
-			strategyId: strategy.id,
+			onChainStrategyId: registryKey,
 			vaultAddress,
 			binaryHash,
 			creator,
@@ -250,7 +256,7 @@ async function publish(options: PublishOptions): Promise<PublishResult> {
 		steps.push({
 			name: 'registry',
 			status: 'done',
-			detail: `anchored ${onChainStrategyId(strategy.id)} -> ${vaultAddress} @ ${binaryHash}`,
+			detail: `anchored ${registryKey} -> ${vaultAddress} @ ${binaryHash}`,
 			txHash: receipt.txHash,
 		})
 	}
@@ -322,6 +328,7 @@ async function publish(options: PublishOptions): Promise<PublishResult> {
 
 	return {
 		strategyId: strategy.id,
+		onChainStrategyId: registryKey,
 		slug: strategy.slug,
 		vaultAddress,
 		agentWalletAddress: agentAddress,

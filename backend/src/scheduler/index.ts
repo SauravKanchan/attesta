@@ -16,6 +16,7 @@ export {
 export {
 	clampPnl,
 	priceDecision,
+	settlementFor,
 	truncatingDiv,
 	type ClampedPnl,
 	type LegPnl,
@@ -23,6 +24,7 @@ export {
 	type PriceDecisionInput,
 	type PricedDecision,
 	type PnlClamp,
+	type Settlement,
 } from './pricing.js'
 export {
 	createScheduler,

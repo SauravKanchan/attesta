@@ -169,6 +169,38 @@ export function priceDecision(input: PriceDecisionInput): PricedDecision {
 	}
 }
 
+/**
+ * Whether the vault can be asked to settle at all this tick.
+ *
+ * `applyPnl` reverts with `NoSharesOutstanding()` on a gain when nobody holds
+ * shares — a gain with no owner would sit in managed assets until the next
+ * depositor, who mints 1:1 against a zero supply and would redeem the whole
+ * stranded amount. A strategy nobody has funded still runs, still decides and
+ * still records a NAV snapshot; it simply has no capital to move, so the
+ * settlement is skipped rather than attempted and lost to a revert.
+ */
+export interface Settlement {
+	settle: boolean
+	/** Why the settlement was skipped, for the execution log. Null when it went ahead. */
+	skipped: string | null
+}
+
+export function settlementFor(
+	delta: bigint,
+	vault: { totalShares: bigint },
+): Settlement {
+	if (vault.totalShares === 0n) {
+		return {
+			settle: false,
+			skipped:
+				delta === 0n
+					? 'vault has no depositors: nothing to settle, so applyPnl was not sent'
+					: `vault has no depositors: applyPnl(${delta}) would revert with NoSharesOutstanding, so it was not sent`,
+		}
+	}
+	return { settle: true, skipped: null }
+}
+
 export type PnlClamp = 'reserve' | 'managed-assets' | null
 
 export interface ClampedPnl {

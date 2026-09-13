@@ -103,6 +103,51 @@ The allocate and withdraw transfers are ordinary supported wallet actions on Arc
 - Privy's fiat onramp routes through MoonPay, which will not support Arc testnet. The
   card-to-USDC step is mocked; the on-chain transfers are real. Do not build the
   onboarding demo around the onramp.
+- A development app, not a production one. Production app IDs set their cookies only on
+  a verified domain, so a session cannot persist on localhost. Privy has no dev/prod
+  toggle — the two are separate apps, and an app ID is a development one by being the one
+  you use in development. Allowed Origins may be left empty for it.
+- Login methods are dashboard toggles, not env vars or code. `config.loginMethods` picks
+  from what is already enabled under Configuration -> Login methods; it cannot enable
+  anything. Google runs on Privy's own OAuth credentials, so no Google Cloud project is
+  needed — your own credentials are a production nicety, not a prerequisite.
+- Only `NEXT_PUBLIC_PRIVY_APP_ID` belongs in the frontend. It is an identifier, not a
+  secret. The app secret is a real secret and belongs to the backend, if anywhere.
+
+**Verifying a Privy token, if the backend ever needs to**
+
+It does not today: the backend verifies a signature over a nonce it issued, not a Privy
+JWT, so it holds no Privy credentials at all. What follows applies the day identity moves
+from the wallet address to the Privy DID.
+
+Privy publishes a JWKS endpoint per app:
+
+```
+https://auth.privy.io/api/v1/apps/<app-id>/jwks.json
+```
+
+Tokens are ES256, issuer `privy.io`, audience the app ID. Verify with `jose` —
+`createRemoteJWKSet` plus `jwtVerify` — and the backend needs no app secret and no
+`@privy-io/node`, because the app ID is public and the keys are public. `payload.sub` is
+the user's DID.
+
+Prefer that endpoint over the PEM verification key in the dashboard. The endpoint serves
+several keys, each with a `kid`, so rotation is handled; a single pinned PEM starts
+rejecting valid tokens the moment Privy rotates.
+
+Two findings below were established by probing the endpoint, not read from the docs:
+
+- The keys are **EC P-256 / ES256**. Privy's own documentation describes the verification
+  key as Ed25519 in at least one place. That is wrong, and a verifier built on it will not
+  work.
+- The endpoint doubles as an app-ID validator. A valid ID returns 200; an invalid one
+  returns 400 `{"code":"missing_or_invalid_privy_app_id"}`. Reach for this first when
+  sign-in fails inexplicably — a whitespace or copy-paste artifact in the app ID presents
+  as a broken integration, not as a bad value.
+
+Holding the DID is not the same as knowing the wallet address: a JWKS-verified token
+carries `sub` only. Fetching the address server-side means calling Privy's API, which is
+what the app secret is for.
 
 ## Why two wallet systems
 

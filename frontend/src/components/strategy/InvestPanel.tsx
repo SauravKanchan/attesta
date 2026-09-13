@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/cn'
-import { ApiError, investInStrategy, withdrawFromStrategy } from '@/lib/api'
+import { ApiError, recordInvestment, recordWithdrawal } from '@/lib/api'
+import { WalletError, investInStrategy, withdrawFromStrategy } from '@/lib/wallet'
 import { Button } from '@/components/ui/Button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { useToast } from '@/components/ui/Toast'
@@ -20,6 +21,16 @@ import {
 } from '@/components/strategy/amount'
 
 type Mode = 'deposit' | 'withdraw'
+
+/**
+ * A failure can come from the wallet (no gas, short balance, a revert the vault named) or
+ * from the backend refusing the receipt. Both carry a message worth showing verbatim.
+ */
+function reasonFor(cause: unknown, fallback: string): string {
+	if (cause instanceof WalletError) return cause.message
+	if (cause instanceof ApiError) return cause.message
+	return fallback
+}
 
 const MODE_OPTIONS: readonly { value: Mode; label: string }[] = [
 	{ value: 'deposit', label: 'Deposit' },
@@ -91,11 +102,15 @@ function DepositForm({ strategy, availableUsdc, onSettled, holding }: DepositFor
 		    ? 'This strategy has no vault deployed yet, so it cannot take an allocation.'
 		    : null
 
+	// The browser signs approve and deposit itself, then hands the backend the hash; the
+	// backend records the position from the receipt rather than from anything claimed here.
 	async function submit() {
-		if (!ready) return
+		const vault = strategy.vaultAddress
+		if (!ready || vault === null) return
 		setSubmitting(true)
 		try {
-			const next = await investInStrategy(strategy.slug, amount)
+			const txHash = await investInStrategy(vault, amount)
+			const next = await recordInvestment(strategy.slug, txHash)
 			toast({
 				tone: 'success',
 				title: holding ? 'Added to your position' : 'Allocation confirmed',
@@ -108,7 +123,7 @@ function DepositForm({ strategy, availableUsdc, onSettled, holding }: DepositFor
 			toast({
 				tone: 'error',
 				title: 'Allocation failed',
-				description: cause instanceof ApiError ? cause.message : 'The backend rejected the deposit.',
+				description: reasonFor(cause, 'The deposit did not go through.'),
 			})
 		} finally {
 			setSubmitting(false)
@@ -177,15 +192,23 @@ function WithdrawForm({ strategy, position, onSettled }: WithdrawFormProps) {
 	const overHolding = shares !== '' && exceeds(shares, position.shares)
 	const invalid = shares !== '' && (parsed === null || parsed <= 0n)
 	const proceeds = shares === '' || parsed === null ? null : amountForShares(shares, navPerShare)
-	const ready = isPositive(shares) && !overHolding && !invalid
+	const ready = isPositive(shares) && !overHolding && !invalid && strategy.vaultAddress !== null
 
-	const error = invalid ? 'Enter a number of shares.' : overHolding ? 'More shares than you hold.' : null
+	const error = invalid
+		? 'Enter a number of shares.'
+		: overHolding
+		  ? 'More shares than you hold.'
+		  : strategy.vaultAddress === null
+		    ? 'This strategy has no vault deployed, so there is nothing to redeem against.'
+		    : null
 
 	async function submit() {
-		if (!ready) return
+		const vault = strategy.vaultAddress
+		if (!ready || vault === null) return
 		setSubmitting(true)
 		try {
-			const next = await withdrawFromStrategy(strategy.slug, shares)
+			const txHash = await withdrawFromStrategy(vault, shares)
+			const next = await recordWithdrawal(strategy.slug, txHash)
 			toast({
 				tone: 'success',
 				title: 'Withdrawal confirmed',
@@ -198,7 +221,7 @@ function WithdrawForm({ strategy, position, onSettled }: WithdrawFormProps) {
 			toast({
 				tone: 'error',
 				title: 'Withdrawal failed',
-				description: cause instanceof ApiError ? cause.message : 'The backend rejected the withdrawal.',
+				description: reasonFor(cause, 'The withdrawal did not go through.'),
 			})
 		} finally {
 			setSubmitting(false)

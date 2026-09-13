@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
 import { formatUsd, formatUsdcPrecise } from '@/lib/format'
-import { ApiError, withdrawFromStrategy } from '@/lib/api'
+import { ApiError, getStrategy, recordWithdrawal } from '@/lib/api'
+import { WalletError, withdrawFromStrategy } from '@/lib/wallet'
 import { amountForShares, formatUnits6, parseUnits6, percentOf, sharesForAmount, unitsOrZero } from '@/components/portfolio/units'
 import type { Position } from '@/lib/types'
 
@@ -63,12 +64,22 @@ export function WithdrawModal({ position, onClose, onWithdrawn }: WithdrawModalP
 		setError(null)
 	}
 
+	// A `Position` names its strategy but not its vault, and the vault is what the browser
+	// has to sign against — so the strategy is re-read here to find the address.
 	async function submit() {
 		if (position === null || invalid) return
 		setSubmitting(true)
 		setError(null)
 		try {
-			const updated = await withdrawFromStrategy(position.strategySlug, formatUnits6(requested.shares))
+			const strategy = await getStrategy(position.strategySlug)
+			if (strategy.vaultAddress === null) {
+				throw new WalletError(
+					'chain-error',
+					'This strategy has no vault deployed, so there is nothing to redeem against.',
+				)
+			}
+			const txHash = await withdrawFromStrategy(strategy.vaultAddress, formatUnits6(requested.shares))
+			const updated = await recordWithdrawal(position.strategySlug, txHash)
 			toast({
 				tone: 'success',
 				title: 'Withdrawal settled',
@@ -78,7 +89,9 @@ export function WithdrawModal({ position, onClose, onWithdrawn }: WithdrawModalP
 		} catch (caught) {
 			console.error('attesta: the withdrawal failed', caught)
 			const message =
-				caught instanceof ApiError ? caught.message : 'The withdrawal could not be submitted'
+				caught instanceof WalletError || caught instanceof ApiError
+					? caught.message
+					: 'The withdrawal could not be submitted'
 			setError(message)
 			toast({ tone: 'error', title: 'Withdrawal failed', description: message })
 		} finally {

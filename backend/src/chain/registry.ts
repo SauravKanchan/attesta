@@ -3,12 +3,21 @@
 //
 // Only the registrar — the account that deployed the registry, i.e. the deployer in the
 // address book — may write, so registration always signs with that account.
+//
+// Every function here takes the registry key already in its bytes32 form. Hashing is done
+// once, by the caller, through `toStrategyId` from lib/strategy-id.ts: a client that took
+// a raw platform id here and hashed it internally would hash a second time whenever a
+// caller had — reasonably — hashed it first, and anchor the strategy under a key nobody
+// can look up.
 
-import { getAddress, isHex, keccak256, toHex, type Account, type Address, type Hex } from 'viem'
+import { getAddress, isHex, type Account, type Address, type Hex } from 'viem'
+import { toStrategyId } from '../lib/strategy-id.js'
 import { strategyRegistryAbi } from './abis.js'
 import { deployerAccount, localChain, publicClient, sendAndWait, walletFor } from './client.js'
 import { registryAddress } from './deployments.js'
 import { onChain } from './errors.js'
+
+export { toStrategyId }
 
 export interface StrategyRecord {
 	strategyId: Hex
@@ -23,15 +32,6 @@ function contract(): { address: Address; abi: typeof strategyRegistryAbi } {
 	return { address: registryAddress(), abi: strategyRegistryAbi }
 }
 
-/**
- * A strategy's database id is a uuid, and the registry keys on bytes32, so the id is
- * hashed rather than truncated: keccak of the id is stable, collision-free in practice,
- * and recomputable by anyone holding the public id.
- */
-export function toStrategyId(id: string): Hex {
-	return keccak256(toHex(id))
-}
-
 /** Normalises a sha256 digest (with or without 0x) into the bytes32 the registry takes. */
 export function toBinaryHash(digest: string): Hex {
 	const value = digest.trim().toLowerCase()
@@ -43,8 +43,8 @@ export function toBinaryHash(digest: string): Hex {
 }
 
 export interface RegisterInput {
-	/** The strategy's database id; hashed to bytes32 by `toStrategyId`. */
-	strategyId: string
+	/** The registry key: keccak256 of the platform id, from `toStrategyId`. */
+	strategyId: Hex
 	vault: Address
 	/** sha256 of the compiled WASM. */
 	binaryHash: string
@@ -64,7 +64,7 @@ export async function register(
 				abi: strategyRegistryAbi,
 				functionName: 'register',
 				args: [
-					toStrategyId(input.strategyId),
+					input.strategyId,
 					getAddress(input.vault),
 					toBinaryHash(input.binaryHash),
 					getAddress(input.creator),
@@ -78,25 +78,25 @@ export async function register(
 	return txHash
 }
 
-export async function isRegistered(strategyId: string): Promise<boolean> {
+export async function isRegistered(strategyId: Hex): Promise<boolean> {
 	return onChain('registry.isRegistered', () =>
 		publicClient.readContract({
 			...contract(),
 			functionName: 'isRegistered',
-			args: [toStrategyId(strategyId)],
+			args: [strategyId],
 		}),
 	)
 }
 
 /** Null when the strategy was never anchored, rather than a revert the caller must catch. */
-export async function getRecord(strategyId: string): Promise<StrategyRecord | null> {
+export async function getRecord(strategyId: Hex): Promise<StrategyRecord | null> {
 	if (!(await isRegistered(strategyId))) return null
 
 	const record = await onChain('registry.get', () =>
 		publicClient.readContract({
 			...contract(),
 			functionName: 'get',
-			args: [toStrategyId(strategyId)],
+			args: [strategyId],
 		}),
 	)
 

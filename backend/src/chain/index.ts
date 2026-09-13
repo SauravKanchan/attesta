@@ -46,3 +46,7 @@ export {
 export type { AddressBook } from './deployments.js'
 
 export { ChainError, onChain, revertReason } from './errors.js'
+
+export { createChainPort, ensurePlatformUsdc, platformAddress } from './port.js'
+
+export { toStrategyId } from '../lib/strategy-id.js'

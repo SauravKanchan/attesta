@@ -14,6 +14,7 @@ import { formatEther, formatUnits, type Address } from 'viem'
 import { closeDatabase, migrateToLatest } from '../db/index.js'
 import { env } from '../lib/env.js'
 import { BACKEND_ROOT } from '../lib/paths.js'
+import { toStrategyId } from '../lib/strategy-id.js'
 import { isChainUp, isContractDeployed, deployerAccount, publicClient } from './client.js'
 import { readAddressBook, registryAddress, syncAddressBook, usdcAddress } from './deployments.js'
 import { ChainError } from './errors.js'
@@ -131,7 +132,8 @@ async function main(): Promise<void> {
 	console.log(`\ninvestor ${investor.address}  gas ${formatEther(await wallets.gasBalance(investor.address))} ETH`)
 	console.log(`operator ${operator.address}  gas ${formatEther(await wallets.gasBalance(operator.address))} ETH`)
 
-	const strategyId = `verify-${Date.now()}`
+	const platformId = `verify-${Date.now()}`
+	const strategyId = toStrategyId(platformId)
 	const deployed = await vault.deployVault('Verify Strategy', operator.address)
 	console.log(`\nvault    ${deployed.address}  (tx ${deployed.txHash})`)
 	console.log(`operator on chain ${await vault.operatorOf(deployed.address)}`)
@@ -183,7 +185,7 @@ async function main(): Promise<void> {
 		creator: investor.address,
 	})
 	const record = await registry.getRecord(strategyId)
-	console.log(`\nregistered ${strategyId} (tx ${registerTx})`)
+	console.log(`\nregistered ${platformId} as ${strategyId} (tx ${registerTx})`)
 	console.log(`  strategyId  ${record?.strategyId}`)
 	console.log(`  vault       ${record?.vault}`)
 	console.log(`  binaryHash  ${record?.binaryHash}`)

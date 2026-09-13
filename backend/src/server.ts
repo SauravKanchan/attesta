@@ -6,7 +6,12 @@ import { env } from './lib/env.js'
 import { HttpError, codeForStatus } from './lib/errors.js'
 import { registerAuth } from './lib/session.js'
 import { authRoutes } from './routes/auth.js'
+import { chainRoutes } from './routes/chain.js'
 import { healthRoutes } from './routes/health.js'
+import { oracleRoutes } from './routes/oracle.js'
+import { portfolioRoutes } from './routes/portfolio.js'
+import { strategyRoutes } from './routes/strategies.js'
+import { submissionRoutes } from './routes/submissions.js'
 
 export function buildServer(): FastifyInstance {
 	const app = Fastify({
@@ -67,6 +72,11 @@ export function buildServer(): FastifyInstance {
 
 	app.register(healthRoutes, { prefix: '/api' })
 	app.register(authRoutes, { prefix: '/api' })
+	app.register(chainRoutes, { prefix: '/api' })
+	app.register(strategyRoutes, { prefix: '/api' })
+	app.register(portfolioRoutes, { prefix: '/api' })
+	app.register(submissionRoutes, { prefix: '/api' })
+	app.register(oracleRoutes, { prefix: '/api' })
 
 	return app
 }

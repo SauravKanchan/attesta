@@ -27,7 +27,7 @@ import { discoverSecretIds } from '../strategy/secrets.js'
 import { creAvailable, failureDetail, simulateWorkspace } from '../strategy/simulate.js'
 import { ensureWorkflow, sourceFingerprint } from '../strategy/workspace.js'
 import { schedulerConfig } from './config.js'
-import { clampPnl, priceDecision, type PricedDecision } from './pricing.js'
+import { clampPnl, priceDecision, settlementFor, type PricedDecision } from './pricing.js'
 import { consoleLogger, priceMap, type ChainPort, type Logger, type OraclePort } from './ports.js'
 import {
 	fromPriceStrings,
@@ -221,12 +221,28 @@ export async function runTick(strategyId: string, deps: TickDeps): Promise<TickO
 		}
 
 		// ── 5 settle ────────────────────────────────────────────
-		const applied = await deps.chain.applyPnl({
-			vaultAddress,
-			operatorKey,
-			delta: clamped.applied,
-		})
-		outcome.txHash = applied.txHash
+		// A vault with no depositors cannot be settled at all — see settlementFor.
+		// The rest of the tick goes ahead regardless: the decision, the trades and
+		// the NAV snapshot are all recorded, so a strategy nobody has funded is
+		// visibly running rather than silently absent.
+		const settlement = settlementFor(clamped.applied, before)
+		if (settlement.skipped) {
+			outcome.pnlApplied = '0'
+			logger.info(
+				{ strategyId, slug: strategy.slug, pnlComputed: outcome.pnlComputed },
+				settlement.skipped,
+			)
+			log.push(settlement.skipped)
+		}
+
+		if (settlement.settle) {
+			const applied = await deps.chain.applyPnl({
+				vaultAddress,
+				operatorKey,
+				delta: clamped.applied,
+			})
+			outcome.txHash = applied.txHash
+		}
 
 		const at = new Date()
 		for (const trade of priced.trades) {
@@ -284,8 +300,8 @@ export async function runTick(strategyId: string, deps: TickDeps): Promise<TickO
 				action: produced.decision.action,
 				targetWeightsBps: weightsBps,
 				reason: formatReason(produced.source, produced.decision.reason),
-				pnlApplied: clamped.applied.toString(),
-				txHash: applied.txHash,
+				pnlApplied: outcome.pnlApplied,
+				txHash: outcome.txHash,
 				durationMs: outcome.durationMs,
 				error: null,
 			})
@@ -313,12 +329,12 @@ export async function runTick(strategyId: string, deps: TickDeps): Promise<TickO
 				weightsBps,
 				marketPnl: priced.marketPnl.toString(),
 				fee: priced.fee.toString(),
-				pnlApplied: clamped.applied.toString(),
+				pnlApplied: outcome.pnlApplied,
 				navPerShare: outcome.navPerShare,
-				txHash: applied.txHash,
+				txHash: outcome.txHash,
 				durationMs: outcome.durationMs,
 			},
-			'tick settled',
+			settlement.settle ? 'tick settled' : 'tick recorded without an on-chain settlement',
 		)
 
 		return outcome

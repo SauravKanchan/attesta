@@ -1,15 +1,19 @@
 import type {
 	ApiError as ApiErrorBody,
+	ChainConfig,
 	EncryptedSecret,
 	Execution,
+	FaucetResult,
 	ListStrategiesQuery,
 	ListStrategiesResponse,
+	LoginChallenge,
 	Portfolio,
 	Position,
 	PositionSeries,
 	Session,
 	StrategyDetail,
 	SubmissionDraft,
+	SubmittedTx,
 	TimeRange,
 	TimeseriesPoint,
 	Trade,
@@ -153,11 +157,6 @@ export interface OraclePrice {
 	t: number
 }
 
-/** POST /wallet/faucet — the caller's balance after the mint. */
-export interface FaucetResult {
-	availableUsdc: string
-}
-
 /** GET /health */
 export interface HealthStatus {
 	status: string
@@ -172,12 +171,29 @@ export type SubmissionPatch = Partial<SubmissionInput>
 
 /* ── Auth ────────────────────────────────────────────────── */
 
-export function login(username: string): Promise<Session> {
-	return request<Session>('/auth/login', { method: 'POST', body: { username } })
+/**
+ * Step one of sign-in: ask for a nonce to sign. Only an address goes over the wire —
+ * there is no request on this API that takes a private key, which is what lets Privy
+ * replace the signer later without touching the protocol.
+ */
+export function requestLoginChallenge(address: string): Promise<LoginChallenge> {
+	return request<LoginChallenge>('/auth/challenge', { method: 'POST', body: { address } })
+}
+
+/** Step two: hand back the signature over `LoginChallenge.message` and take a session. */
+export function verifyLoginSignature(address: string, signature: string): Promise<Session> {
+	return request<Session>('/auth/verify', { method: 'POST', body: { address, signature } })
 }
 
 export function getMe(): Promise<User> {
 	return request<User>('/auth/me')
+}
+
+/* ── Chain ───────────────────────────────────────────────── */
+
+/** Addresses, chain id and RPC URL, so the browser can build its own transactions. */
+export function getChainConfig(): Promise<ChainConfig> {
+	return request<ChainConfig>('/chain/config')
 }
 
 /* ── Strategies ──────────────────────────────────────────── */
@@ -220,12 +236,20 @@ export function getStrategySource(slug: string): Promise<string> {
 	return requestText(`/strategies/${encodeURIComponent(slug)}/source`)
 }
 
-export function investInStrategy(slug: string, amount: string): Promise<Position> {
-	return request<Position>(`/strategies/${encodeURIComponent(slug)}/invest`, { method: 'POST', body: { amount } })
+/**
+ * The browser signs and broadcasts the deposit itself; this hands the backend the hash so
+ * it can fetch the receipt, read the `Deposited` event and record the position from what
+ * the chain says happened. A forged or replayed hash therefore records nothing.
+ */
+export function recordInvestment(slug: string, txHash: string): Promise<Position> {
+	const body: SubmittedTx = { txHash }
+	return request<Position>(`/strategies/${encodeURIComponent(slug)}/invest`, { method: 'POST', body })
 }
 
-export function withdrawFromStrategy(slug: string, shares: string): Promise<Position> {
-	return request<Position>(`/strategies/${encodeURIComponent(slug)}/withdraw`, { method: 'POST', body: { shares } })
+/** The same shape for the other direction: the browser sent it, the chain proves it. */
+export function recordWithdrawal(slug: string, txHash: string): Promise<Position> {
+	const body: SubmittedTx = { txHash }
+	return request<Position>(`/strategies/${encodeURIComponent(slug)}/withdraw`, { method: 'POST', body })
 }
 
 /* ── Portfolio and wallet ────────────────────────────────── */

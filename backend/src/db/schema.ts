@@ -19,20 +19,41 @@ const now = (column: string) =>
 
 // ─── Identity ───────────────────────────────────────────────
 
-// The private key is a local anvil EOA standing in for a Privy embedded wallet, which has
-// no local runtime. Nothing of value is ever held by these keys.
+// The wallet address is the identity, proved by signing a challenge. There is deliberately
+// no key column: the browser holds the signer, so the platform cannot move a user's money
+// even if it wanted to, and Privy's embedded wallet drops into the same seam.
 export const users = sqliteTable(
 	'users',
 	{
 		id: id(),
 		username: text('username').notNull(),
+		/** Checksummed. The account whose signature opened this session. */
 		walletAddress: text('wallet_address').notNull(),
-		privateKey: text('private_key').notNull(),
 		createdAt: now('created_at'),
 	},
 	(t) => [
 		uniqueIndex('users_username_unique').on(t.username),
 		uniqueIndex('users_wallet_address_unique').on(t.walletAddress),
+	],
+)
+
+// A nonce the browser must sign to prove control of an address. Rows are single-use and
+// short-lived: `consumedAt` closes a nonce the moment it buys a session, so replaying the
+// same signature finds nothing left to spend.
+export const authChallenges = sqliteTable(
+	'auth_challenges',
+	{
+		nonce: text('nonce').primaryKey(),
+		address: text('address').notNull(),
+		/** The exact string that was signed, kept so recovery uses the server's own text. */
+		message: text('message').notNull(),
+		expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+		consumedAt: integer('consumed_at', { mode: 'timestamp_ms' }),
+		createdAt: now('created_at'),
+	},
+	(t) => [
+		index('auth_challenges_address_idx').on(t.address),
+		index('auth_challenges_expires_at_idx').on(t.expiresAt),
 	],
 )
 
@@ -260,6 +281,7 @@ export const deployments = sqliteTable('deployments', {
 })
 
 export type UserRow = typeof users.$inferSelect
+export type AuthChallengeRow = typeof authChallenges.$inferSelect
 export type SessionRow = typeof sessions.$inferSelect
 export type StrategyRow = typeof strategies.$inferSelect
 export type SubmissionRow = typeof submissions.$inferSelect

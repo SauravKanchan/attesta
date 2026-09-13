@@ -3,7 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { ApiError, getMe, getToken, login, setToken } from '@/lib/api'
+import { ApiError, getMe, getToken, requestLoginChallenge, setToken, verifyLoginSignature } from '@/lib/api'
+import { clear as clearWallet, getSigner, signInWithPrivateKey } from '@/lib/wallet'
 import type { User } from '@/lib/types'
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
@@ -11,7 +12,13 @@ export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
 interface AuthContextValue {
 	status: AuthStatus
 	user: User | null
-	signIn: (username: string) => Promise<void>
+	/**
+	 * Takes a private key because the local build's signer is a pasted key. The key is
+	 * installed in `lib/wallet` and never sent anywhere: what crosses the wire is the
+	 * address, and a signature over the nonce the server issues for it. Swapping Privy in
+	 * changes what produces the signer, not this signature.
+	 */
+	signIn: (privateKey: string) => Promise<void>
 	signOut: () => void
 }
 
@@ -38,9 +45,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			setStatus('anonymous')
 			return
 		}
+
+		// A session whose key this browser no longer holds can read but cannot sign, and
+		// every money action would fail at the last step. Treat it as signed out.
+		const signer = getSigner()
+		if (signer === null) {
+			console.warn('attesta: a session token survived without its wallet key; signing out')
+			setToken(null)
+			setStatus('anonymous')
+			return
+		}
+
 		getMe()
 			.then((me) => {
 				if (cancelled) return
+				if (me.walletAddress.toLowerCase() !== signer.address.toLowerCase()) {
+					console.warn('attesta: the stored wallet signs for a different address than the session', {
+						session: me.walletAddress,
+						wallet: signer.address,
+					})
+					setToken(null)
+					clearWallet()
+					setUser(null)
+					setStatus('anonymous')
+					return
+				}
 				setUser(me)
 				setStatus('authenticated')
 			})
@@ -65,17 +94,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	}, [status, pathname, router])
 
 	const signIn = useCallback(
-		async (username: string) => {
-			const session = await login(username)
-			setToken(session.token)
-			setUser(session.user)
-			setStatus('authenticated')
-			router.replace('/')
+		async (privateKey: string) => {
+			const signer = signInWithPrivateKey(privateKey)
+			try {
+				const challenge = await requestLoginChallenge(signer.address)
+				const signature = await signer.signMessage(challenge.message)
+				const session = await verifyLoginSignature(signer.address, signature)
+				setToken(session.token)
+				setUser(session.user)
+				setStatus('authenticated')
+				router.replace('/')
+			} catch (error) {
+				console.error('attesta: proving control of the address failed', error)
+				clearWallet()
+				throw error
+			}
 		},
 		[router],
 	)
 
 	const signOut = useCallback(() => {
+		clearWallet()
 		setToken(null)
 		setUser(null)
 		setStatus('anonymous')
