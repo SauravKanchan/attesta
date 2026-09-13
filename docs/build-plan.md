@@ -69,6 +69,18 @@ browser                                     backend
   POST /auth/verify {address, signature} ──▶  recoverMessageAddress, compare, issue a session
 ```
 
+Two details the client must match exactly, or recovery fails in a way that looks like a
+bad key:
+
+- **Sign `challenge.message` verbatim.** The server builds a multi-line SIWE-style string
+  containing the nonce, Issued At and Expires At, and derives its domain line from
+  `CORS_ORIGIN`. Reconstructing the message client-side will not recover to the same
+  address.
+- **Echo back `challenge.address`, not the casing you sent.** Addresses are normalised
+  with `getAddress` and stored checksummed.
+
+Nonces are single-use with a 5-minute TTL; a consumed nonce is refused.
+
 The key is held in browser memory, persisted to `localStorage` only because this is a
 local dev build, and the login screen says so plainly. Replacing it with Privy means
 replacing where the signer comes from — the challenge/verify exchange is unchanged.
