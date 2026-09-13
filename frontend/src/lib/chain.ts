@@ -7,6 +7,12 @@
  * moves it for the browser too, with no rebuild.
  *
  * The fetch happens once per page load and is shared by every caller.
+ *
+ * The one exception is `bootstrapChain`, which has to answer before any fetch can:
+ * `PrivyProvider` demands `supportedChains` and `defaultChain` at mount time, synchronously.
+ * That answer comes from `NEXT_PUBLIC_CHAIN_ID` and `NEXT_PUBLIC_RPC_URL`, which exist for
+ * exactly this pre-hydration window. Contract addresses are never bootstrapped: an anvil
+ * redeploy moves them, so they only ever come from the fetched config.
  */
 
 import { createPublicClient, defineChain, getAddress, http } from 'viem'
@@ -20,6 +26,46 @@ import type { ChainConfig } from '@/lib/types'
  * builds. anvil pays gas in ETH.
  */
 const NATIVE_CURRENCY = { name: 'Ether', symbol: 'ETH', decimals: 18 } as const
+
+/** anvil's defaults, used only when the env vars are absent — this build is local-only. */
+const FALLBACK_CHAIN_ID = 31337
+const FALLBACK_RPC_URL = 'http://127.0.0.1:8545'
+
+function bootstrapChainId(): number {
+	const raw = process.env.NEXT_PUBLIC_CHAIN_ID
+	const parsed = Number(raw)
+	if (raw === undefined || raw === '' || !Number.isInteger(parsed) || parsed <= 0) {
+		console.warn('attesta: NEXT_PUBLIC_CHAIN_ID is missing or unusable; bootstrapping on anvil', { raw })
+		return FALLBACK_CHAIN_ID
+	}
+	return parsed
+}
+
+function bootstrapRpcUrl(): string {
+	const raw = process.env.NEXT_PUBLIC_RPC_URL
+	if (raw === undefined || raw === '') {
+		console.warn('attesta: NEXT_PUBLIC_RPC_URL is missing; bootstrapping on anvil')
+		return FALLBACK_RPC_URL
+	}
+	return raw
+}
+
+/**
+ * The chain as env describes it, built without waiting on the backend. Only mount-time
+ * consumers may read this — `PrivyProvider`, whose embedded wallet refuses to switch to a
+ * chain outside `supportedChains`. Everything after hydration reads `loadChain()`, and the
+ * fetched config wins wherever the two disagree.
+ */
+export function bootstrapChain(): Chain {
+	const rpcUrl = bootstrapRpcUrl()
+	const id = bootstrapChainId()
+	return defineChain({
+		id,
+		name: `chain ${id}`,
+		nativeCurrency: NATIVE_CURRENCY,
+		rpcUrls: { default: { http: [rpcUrl] } },
+	})
+}
 
 export interface ResolvedChain {
 	config: ChainConfig

@@ -37,13 +37,16 @@
     "**/*.ts",
     "**/*.tsx",
     "../shared/**/*.ts",
+    ".next-demo/types/**/*.ts",
     ".next-e2e-browse/types/**/*.ts",
+    ".next-e2e-create/types/**/*.ts",
     ".next-money/types/**/*.ts",
+    ".next-portfolio/types/**/*.ts",
     ".next-shots/types/**/*.ts",
     ".next-submission/types/**/*.ts",
     ".next/types/**/*.ts",
     "next-env.d.ts",
-    ".next-e2e-create/types/**/*.ts"
+    ".next-critique/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

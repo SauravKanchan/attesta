@@ -21,13 +21,7 @@ import {
 	verifyLoginSignature,
 } from '@/lib/api'
 import { bootstrapChain } from '@/lib/chain'
-import {
-	clear as clearWallet,
-	getSigner,
-	signInWithPrivateKey,
-	signInWithPrivy,
-	storedSignerKind,
-} from '@/lib/wallet'
+import { clear as clearWallet, getSigner, signInWithPrivy, storedSignerKind } from '@/lib/wallet'
 import type { Signer } from '@/lib/wallet'
 import type { User } from '@/lib/types'
 
@@ -37,15 +31,8 @@ interface AuthContextValue {
 	status: AuthStatus
 	user: User | null
 	/**
-	 * Takes a private key because one of the two signers is a pasted key. The key is
-	 * installed in `lib/wallet` and never sent anywhere: what crosses the wire is the
-	 * address, and a signature over the nonce the server issues for it. The Privy path
-	 * below produces the same signature from an embedded wallet.
-	 */
-	signIn: (privateKey: string) => Promise<void>
-	/**
-	 * Opens Privy's login modal and, once an embedded wallet exists, runs the same
-	 * challenge/verify exchange with it. Resolves as soon as the modal is open — the rest
+	 * Opens Privy's login modal and, once an embedded wallet exists, runs the
+	 * challenge/verify exchange with it. Returns as soon as the modal is open — the rest
 	 * happens as Privy's state settles, and `privySigningIn` reports it.
 	 */
 	signInWithPrivyWallet: () => void
@@ -146,7 +133,7 @@ export function PrivyWalletProvider({ children }: { children: ReactNode }) {
 	const chain = useMemo(() => bootstrapChain(), [])
 
 	if (appId === undefined || appId === '') {
-		console.warn('attesta: NEXT_PUBLIC_PRIVY_APP_ID is unset; only the pasted-key sign-in is offered')
+		console.warn('attesta: NEXT_PUBLIC_PRIVY_APP_ID is unset; nobody can sign in')
 		return <>{children}</>
 	}
 
@@ -225,7 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				interactive.current = false
 				setPrivyPhase('awaiting')
 			} else {
-				console.warn('attesta: a session token survived without its wallet key; signing out')
+				console.warn('attesta: a session token survived without a wallet to sign with; signing out')
 				setToken(null)
 				setStatus('anonymous')
 				return
@@ -236,7 +223,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			.then((me) => {
 				if (cancelled) return
 				if (signer !== null && me.walletAddress.toLowerCase() !== signer.address.toLowerCase()) {
-					console.warn('attesta: the stored wallet signs for a different address than the session', {
+					console.warn('attesta: the connected wallet signs for a different address than the session', {
 						session: me.walletAddress,
 						wallet: signer.address,
 					})
@@ -278,24 +265,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		// Echo back the address as the server checksummed it, not as it was sent.
 		return verifyLoginSignature(challenge.address, signature)
 	}, [])
-
-	const signIn = useCallback(
-		async (privateKey: string) => {
-			const signer = signInWithPrivateKey(privateKey)
-			try {
-				const session = await proveAddress(signer)
-				setToken(session.token)
-				setUser(session.user)
-				setStatus('authenticated')
-				router.replace('/')
-			} catch (error) {
-				console.error('attesta: proving control of the address failed', error)
-				clearWallet()
-				throw error
-			}
-		},
-		[router, proveAddress],
-	)
 
 	const signInWithPrivyWallet = useCallback(() => {
 		if (!privy.available) {
@@ -415,7 +384,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				authenticated: privy.authenticated,
 			})
 			setPrivyPhase('idle')
-			setPrivyError('Privy did not finish signing in. Try again, or use a private key.')
+			setPrivyError('Privy did not finish signing in. Try again.')
 			setStatus((current) => (current === 'loading' ? 'anonymous' : current))
 		}, PRIVY_TIMEOUT_MS)
 		return () => window.clearTimeout(timer)
@@ -444,14 +413,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		() => ({
 			status,
 			user,
-			signIn,
 			signInWithPrivyWallet,
 			privyAvailable: privy.available,
 			privySigningIn: privyPhase !== 'idle',
 			privyError,
 			signOut,
 		}),
-		[status, user, signIn, signInWithPrivyWallet, privy.available, privyPhase, privyError, signOut],
+		[status, user, signInWithPrivyWallet, privy.available, privyPhase, privyError, signOut],
 	)
 
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

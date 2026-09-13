@@ -1,30 +1,27 @@
 /**
  * The browser's signer, and the two money actions it signs.
  *
- * The private key never leaves this module and never reaches the backend. Signing in
- * proves control of an address by signing a server nonce; depositing and withdrawing are
- * transactions this browser builds, signs and broadcasts itself. The backend only ever
- * sees a transaction hash and checks the receipt.
+ * No key ever reaches this module or the backend. Signing in proves control of an address
+ * by signing a server nonce; depositing and withdrawing are transactions this browser
+ * builds, signs and broadcasts itself. The backend only ever sees a transaction hash and
+ * checks the receipt.
  *
  * ── The Privy seam ──────────────────────────────────────────────────────────────────
- * Everything below the `Signer` interface is one implementation of it: a key pasted into
- * the login screen, held in memory and mirrored to localStorage because this is a local
- * dev build. Privy's embedded wallet supplies the same three capabilities — an address, a
- * personal_sign, and a viem wallet client — so dropping it in means adding a second
- * implementation of `Signer` and changing which one `signInWithPrivateKey` installs.
- * Nothing that calls `getAddress`, `signMessage`, `investInStrategy` or
- * `withdrawFromStrategy` has to change, because none of them know where the signer came
- * from. That is the whole reason the key sits on this side of the wire.
+ * The one implementation of `Signer` below is a Privy embedded wallet reached through its
+ * EIP-1193 provider. It supplies three capabilities — an address, a personal_sign, and a
+ * viem wallet client — and everything that calls `getAddress`, `signMessage`,
+ * `investInStrategy` or `withdrawFromStrategy` goes through that interface rather than
+ * through Privy, so another signer can be added without touching a caller.
  */
 
 import {
 	BaseError,
 	ContractFunctionRevertedError,
 	createWalletClient,
+	custom,
 	formatEther,
 	formatUnits,
 	getAddress as toChecksumAddress,
-	http,
 	parseUnits,
 	type Account,
 	type Address,
@@ -33,7 +30,6 @@ import {
 	type Transport,
 	type WalletClient,
 } from 'viem'
-import { privateKeyToAccount } from 'viem/accounts'
 import { loadChain } from '@/lib/chain'
 import type { ResolvedChain } from '@/lib/chain'
 
@@ -146,7 +142,6 @@ const vaultAbi = [
 
 export type WalletErrorCode =
 	| 'no-wallet'
-	| 'invalid-key'
 	| 'invalid-amount'
 	| 'no-gas'
 	| 'insufficient-usdc'
@@ -166,12 +161,13 @@ export class WalletError extends Error {
 
 /* ── The signer ──────────────────────────────────────────── */
 
-export type SignerKind = 'local-key' | 'privy'
+/** One member today; the union is the seam another signer would join. */
+export type SignerKind = 'privy'
 
 export type BrowserWalletClient = WalletClient<Transport, Chain, Account>
 
 export interface Signer {
-	/** Which implementation this is. A Privy signer would report its own kind. */
+	/** Which implementation this is. */
 	readonly kind: SignerKind
 	readonly address: Address
 	/** personal_sign over the exact string the server issued. */
@@ -180,103 +176,150 @@ export interface Signer {
 	walletClient(): Promise<BrowserWalletClient>
 }
 
-const KEY_STORAGE_KEY = 'attesta.wallet.key'
+/**
+ * Which implementation signed in last. A Privy session outlives a page load in Privy's own
+ * storage, but the embedded wallet is not in hand until its provider has booted — so on
+ * reload this is the only thing that distinguishes "wait for Privy" from "signed out".
+ */
+const KIND_STORAGE_KEY = 'attesta.wallet.kind'
 
-let active: Signer | null = null
-/** Set once localStorage has been consulted, so a cleared wallet is not re-read. */
-let restored = false
+/**
+ * Nothing writes this any more, and a browser that still holds one is holding a raw
+ * private key for no reason. Dropped on load rather than on sign-out, because a tab that
+ * never signs out would keep it forever.
+ */
+const LEGACY_KEY_STORAGE_KEY = 'attesta.wallet.key'
 
-/** `abc…` and `0xabc…` are both accepted; anything else is not a key. */
-function normaliseKey(raw: string): Hex {
-	const trimmed = raw.trim()
-	const prefixed = trimmed.startsWith('0x') || trimmed.startsWith('0X') ? trimmed : `0x${trimmed}`
-	if (!/^0x[0-9a-fA-F]{64}$/.test(prefixed)) {
-		throw new WalletError(
-			'invalid-key',
-			'That is not a private key. Paste 64 hex characters, with or without the 0x prefix.',
-		)
+if (typeof window !== 'undefined') {
+	try {
+		window.localStorage.removeItem(LEGACY_KEY_STORAGE_KEY)
+	} catch (error) {
+		console.error('attesta: could not clear the stored wallet key from localStorage', error)
 	}
-	return prefixed.toLowerCase() as Hex
 }
 
-function localKeySigner(privateKey: Hex): Signer {
-	const account = privateKeyToAccount(privateKey)
+let active: Signer | null = null
+
+/**
+ * viem's `custom` transport only ever calls `request`, and both `on`/`removeListener` and
+ * viem's per-method `params` unions are where wallet SDKs and viem disagree on typing.
+ * Asking for the one method actually used keeps any EIP-1193 provider assignable.
+ */
+interface Eip1193Requester {
+	request(args: { method: string; params?: unknown[] }): Promise<unknown>
+}
+
+/**
+ * The parts of Privy's `ConnectedWallet` this module needs. Declared structurally rather
+ * than imported so nothing outside the React tree depends on the Privy SDK.
+ */
+export interface PrivyEmbeddedWallet {
+	address: string
+	/** Throws when the target chain is not in `PrivyProvider`'s `supportedChains`. */
+	switchChain(chainId: number): Promise<void>
+	getEthereumProvider(): Promise<Eip1193Requester>
+}
+
+/**
+ * A Privy embedded wallet as a `Signer`. Signing goes through viem rather than through a
+ * hand-rolled `personal_sign`, so the message is hex-encoded exactly the way
+ * `recoverMessageAddress` on the backend expects it.
+ */
+function privySigner(wallet: PrivyEmbeddedWallet): Signer {
+	const address = toChecksumAddress(wallet.address)
 	let client: BrowserWalletClient | null = null
 
+	async function connect(): Promise<BrowserWalletClient> {
+		if (client) return client
+		const { chain } = await loadChain()
+		try {
+			await wallet.switchChain(chain.id)
+		} catch (error) {
+			console.error('attesta: the embedded wallet would not switch to the configured chain', {
+				chainId: chain.id,
+				error,
+			})
+			throw new WalletError(
+				'chain-error',
+				`The embedded wallet could not switch to chain ${chain.id}`,
+				error,
+			)
+		}
+		let provider: Eip1193Requester
+		try {
+			provider = await wallet.getEthereumProvider()
+		} catch (error) {
+			console.error('attesta: the embedded wallet did not hand over a provider', error)
+			throw new WalletError('no-wallet', 'The embedded wallet is not ready yet', error)
+		}
+		client = createWalletClient({ account: address, chain, transport: custom(provider) })
+		return client
+	}
+
 	return {
-		kind: 'local-key',
-		address: account.address,
+		kind: 'privy',
+		address,
 		async signMessage(message: string): Promise<Hex> {
 			try {
-				return await account.signMessage({ message })
+				const connected = await connect()
+				return await connected.signMessage({ account: address, message })
 			} catch (error) {
-				console.error('attesta: signing the sign-in challenge failed', error)
+				if (error instanceof WalletError) throw error
+				console.error('attesta: the embedded wallet could not sign the challenge', error)
 				throw new WalletError('chain-error', 'The wallet could not sign the message', error)
 			}
 		},
-		async walletClient(): Promise<BrowserWalletClient> {
-			if (client) return client
-			const { chain, config } = await loadChain()
-			client = createWalletClient({ account, chain, transport: http(config.rpcUrl) })
-			return client
-		},
-	}
-}
-
-function readStoredKey(): Hex | null {
-	if (typeof window === 'undefined') return null
-	try {
-		const stored = window.localStorage.getItem(KEY_STORAGE_KEY)
-		return stored === null ? null : normaliseKey(stored)
-	} catch (error) {
-		console.error('attesta: could not read the wallet key from localStorage', error)
-		return null
-	}
-}
-
-function writeStoredKey(privateKey: Hex | null): void {
-	if (typeof window === 'undefined') return
-	try {
-		if (privateKey === null) window.localStorage.removeItem(KEY_STORAGE_KEY)
-		else window.localStorage.setItem(KEY_STORAGE_KEY, privateKey)
-	} catch (error) {
-		console.error('attesta: could not persist the wallet key to localStorage', error)
+		walletClient: connect,
 	}
 }
 
 /**
- * Installs a signer for the pasted key and remembers it for the next page load. Throws
- * `WalletError('invalid-key')` on anything that is not a 32-byte key.
+ * Installs a Privy embedded wallet as this session's signer. Nothing secret is stored —
+ * Privy holds the session — so only the kind is remembered, for the reload case.
  */
-export function signInWithPrivateKey(raw: string): Signer {
-	const privateKey = normaliseKey(raw)
+export function signInWithPrivy(wallet: PrivyEmbeddedWallet): Signer {
 	let signer: Signer
 	try {
-		signer = localKeySigner(privateKey)
+		signer = privySigner(wallet)
 	} catch (error) {
-		console.error('attesta: could not derive an account from the pasted key', error)
-		throw new WalletError('invalid-key', 'That key does not derive an account', error)
+		console.error('attesta: the Privy wallet did not yield a usable address', {
+			address: wallet.address,
+			error,
+		})
+		throw new WalletError('no-wallet', 'That Privy wallet has no usable address', error)
 	}
-	writeStoredKey(privateKey)
+	writeStoredKind('privy')
 	active = signer
-	restored = true
 	return signer
 }
 
-/** The signer for this session, restoring the persisted key on first ask. */
-export function getSigner(): Signer | null {
-	if (active) return active
-	if (restored) return null
-	restored = true
-	const stored = readStoredKey()
-	if (stored === null) return null
+function writeStoredKind(kind: SignerKind | null): void {
+	if (typeof window === 'undefined') return
 	try {
-		active = localKeySigner(stored)
+		if (kind === null) window.localStorage.removeItem(KIND_STORAGE_KEY)
+		else window.localStorage.setItem(KIND_STORAGE_KEY, kind)
 	} catch (error) {
-		console.error('attesta: the persisted wallet key is unusable and has been dropped', error)
-		writeStoredKey(null)
+		console.error('attesta: could not persist the signer kind to localStorage', error)
+	}
+}
+
+/** Which signer signed in last, as far as this browser remembers. */
+export function storedSignerKind(): SignerKind | null {
+	if (typeof window === 'undefined') return null
+	try {
+		const stored = window.localStorage.getItem(KIND_STORAGE_KEY)
+		return stored === 'privy' ? stored : null
+	} catch (error) {
+		console.error('attesta: could not read the signer kind from localStorage', error)
 		return null
 	}
+}
+
+/**
+ * The signer for this session. There is nothing to restore from storage: a Privy wallet is
+ * installed by the React tree once the provider has booted, on sign-in and on reload alike.
+ */
+export function getSigner(): Signer | null {
 	return active
 }
 
@@ -302,28 +345,10 @@ export function getWalletClient(): Promise<BrowserWalletClient> {
 	return requireSigner().walletClient()
 }
 
-/** Forgets the key, in memory and in storage. Sign-out must leave nothing behind. */
+/** Forgets the wallet, in memory and in storage. Sign-out must leave nothing behind. */
 export function clear(): void {
 	active = null
-	restored = true
-	writeStoredKey(null)
-}
-
-/**
- * The address a key would sign as, without installing it — what the login screen shows
- * live as the user types. Returns null rather than throwing, because a half-typed key is
- * the normal case there.
- */
-export function deriveAddress(raw: string): Address | null {
-	if (raw.trim() === '') return null
-	try {
-		return privateKeyToAccount(normaliseKey(raw)).address
-	} catch (error) {
-		if (!(error instanceof WalletError)) {
-			console.error('attesta: could not derive an address from the entered key', error)
-		}
-		return null
-	}
+	writeStoredKind(null)
 }
 
 /* ── Money ───────────────────────────────────────────────── */

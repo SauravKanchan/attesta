@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { cookies } from 'next/headers'
 import { Inter, JetBrains_Mono } from 'next/font/google'
 import { AppShell } from '@/components/AppShell'
-import { AuthProvider } from '@/components/AuthProvider'
+import { AuthProvider, PrivyWalletProvider } from '@/components/AuthProvider'
 import { ToastProvider } from '@/components/ui/Toast'
 import { SESSION_HINT_COOKIE } from '@/lib/session-hint'
 import type { SessionHint } from '@/lib/session-hint'
@@ -44,9 +44,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
 		<html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
 			<body className="min-h-screen bg-canvas text-fg antialiased">
 				<ToastProvider>
-					<AuthProvider>
-						<AppShell sessionHint={sessionHint}>{children}</AppShell>
-					</AuthProvider>
+					<PrivyWalletProvider>
+						<AuthProvider>
+							<AppShell sessionHint={sessionHint}>{children}</AppShell>
+						</AuthProvider>
+					</PrivyWalletProvider>
 				</ToastProvider>
 			</body>
 		</html>
