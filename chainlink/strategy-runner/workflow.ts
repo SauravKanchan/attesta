@@ -13,6 +13,7 @@ export const configSchema = z.object({
 	schedule: z.string(),
 	url: z.string(),
 	secretId: z.string(),
+	secretNamespace: z.string(),
 	scoreThreshold: z.number(),
 })
 type Config = z.infer<typeof configSchema>
@@ -52,7 +53,9 @@ export const onCronTrigger = (runtime: TeeRuntime<Config>): string => {
 	// The Vault DON releases this secret only into an attested enclave, and it is
 	// decrypted at the moment `getSecret()` runs. There is nothing to declare
 	// upfront (unlike Confidential HTTP's `vaultDonSecrets`).
-	const apiToken = runtime.getSecret({ id: config.secretId }).result().value
+	const apiToken = runtime
+		.getSecret({ id: config.secretId, namespace: config.secretNamespace })
+		.result().value
 
 	// ── Step 3: Make a capability call from inside the enclave ──
 	// `HTTPClient.sendRequest()` has a `TeeRuntime` overload, so passing the TEE

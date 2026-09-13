@@ -18,3 +18,6 @@ build/
 
 # CRE build temp
 .cre_build_tmp.js
+
+# CRE deploy artifact
+binary.wasm.br.b64
