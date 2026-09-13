@@ -23,8 +23,9 @@ build/
 binary.wasm.br.b64
 .playwright-mcp/
 
-# Next.js
+# Next.js. Parallel test stacks each build into their own dist dir via NEXT_DIST_DIR.
 .next/
+.next-*/
 out/
 next-env.d.ts
 

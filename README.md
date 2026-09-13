@@ -1,141 +1,164 @@
-<div align="center">
+<img src="docs/assets/attesta-banner.svg" alt="attesta" width="100%">
 
-<img src="docs/assets/attesta-banner.svg" alt="attesta" width="760">
+# attesta
 
-<br>
+**Trading strategies whose track record is attested, not claimed.**
 
-[![ETHOnline 2026](https://img.shields.io/badge/ETHOnline-2026-10B981?style=flat-square&labelColor=0E1117)](https://ethglobal.com/events/ethonline2026)
-[![Chainlink CRE](https://img.shields.io/badge/Chainlink-CRE_Confidential_Workflows-0284C7?style=flat-square&labelColor=0E1117)](docs/prizes.md#chainlink--cre-confidential-workflows)
-[![Circle](https://img.shields.io/badge/Circle-Agent_Wallets_on_Arc-0284C7?style=flat-square&labelColor=0E1117)](docs/prizes.md#circle--agent-wallets-on-arc)
-[![Privy](https://img.shields.io/badge/Privy-Embedded_Wallets-0284C7?style=flat-square&labelColor=0E1117)](docs/prizes.md#privy--investor-wallets)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&labelColor=0E1117)](shared/types.ts)
+Anyone can publish a trading strategy as TypeScript. attesta compiles it, measures the
+binary, runs it inside an AWS Nitro enclave through Chainlink CRE, and settles each tick's
+result into an on-chain vault. Investors allocate USDC against a performance record that
+is *derived* from those runs — so every number on the page traces back to the exact binary
+that produced it, and a creator cannot build a record on one strategy and quietly swap in
+another.
 
-</div>
+![A strategy's detail page: derived metrics, on-chain trades, and the verification chain](docs/screenshots/03-strategy-detail-verified.png)
+
+> **Hackathon build (ETHOnline 2026).** Everything runs locally against an anvil chain on
+> `31337`. No testnet, no mainnet, no real funds. The
+> [boundary between what is real and what is a local stand-in](docs/demo.md#5-the-boundary-in-a-table)
+> is written down rather than blurred.
 
 ---
 
-Anyone can claim 40% APY. Copy-trading desks, signal groups and DeFi vaults all ask you to
-trust a number published by the same party that profits from it — and the strategies with a
-real edge won't show you their code, because publishing the parameters destroys the edge.
-You get a choice between unverifiable claims and nothing at all.
+## Why it exists
 
-**attesta removes the choice.** A creator uploads a TypeScript trading strategy. It is
-compiled, registered on-chain, and run inside a hardware-isolated TEE as a Chainlink CRE
-Confidential Workflow. Every trade and every performance figure leaves that enclave signed.
+A strategy marketplace has one hard problem: the track record is a claim, published by
+whoever profits from it. Audits do not fix it, because the audited code and the running
+code are different things.
 
-- **A creator cannot swap the script** after building a track record — the workflow hash is
-  the strategy's identity, and it would change.
-- **The platform cannot inflate returns** — it does not sign the performance record. The
-  enclave does.
-- **Parameters stay private** — they are encrypted in the creator's own browser before they
-  ever reach us, and there is no read-back API. The code is open; the tuning is not.
+A TEE does fix it. The strategy's identity is the hash of its compiled workflow binary; it
+runs inside an enclave nobody — creator, platform, or node operator — can reach into; and
+the decisions it makes are what move the vault. Verification is therefore mechanical:
+rebuild the published source, hash the binary, compare it with what is registered on
+chain.
 
-Investors sign in with Privy, browse strategies, and allocate USDC. It reads like a passive
-fund — except the numbers are attested rather than asserted.
+The same enclave keeps the creator's *parameters* private, so a strategy can prove its
+record without publishing its edge. Code is open; thresholds are not.
 
-## Architecture
+## The three layers, and what is actually wired
 
-Three layers, each with a single owner.
+The architecture has three layers. Be clear about which of them exist in this repo today —
+[docs/prizes.md](docs/prizes.md) is the authority, and it marks the Circle layer as not
+implemented.
 
-| Layer | Technology | Responsibility |
+| Layer | Running in this build | The production shape |
 |---|---|---|
-| **Compute** | Chainlink CRE Confidential Workflows | Strategy logic and risk guardrails execute inside the TEE. Secrets come from the Vault DON. Signed reports leave the enclave. |
-| **Settlement** | Circle Agent Wallets on Arc | One policy-capped USDC wallet per strategy instance — spend limits, contract and chain allowlists. |
-| **Distribution** | Privy | Investor onboarding: social login, embedded wallet, funding, allocation, withdrawal. |
+| **Compute** | **Chainlink CRE, for real.** Each strategy is generated as a confidential workflow whose cron handler is registered with `cre.handlerInTee(..., [{ tee: 'nitro', regions: ['us-west-2'] }])`. It reads its parameters through the Vault DON API, fetches prices over the enclave's own HTTP client, and crosses back to the DON to sign the decision. Exercised through `cre workflow build` and `cre workflow simulate`. | The same workflow deployed to the Workflow DON, scheduled by its cron trigger. Live execution is currently blocked by a Chainlink-side regression — [chainlink/SETUP.md](chainlink/SETUP.md). |
+| **Settlement** | A `StrategyVault` per strategy on a local anvil chain, denominated in a 6-decimal MockUSDC. The vault's `operator` — the account that settles a tick — is an anvil EOA the backend funds and holds the key for. | Circle Agent Wallets on Arc, policy-capped and directed from inside the enclave. **Designed for, not built.** |
+| **Distribution** | A private key held in the browser: it derives the address, signs the server's nonce to sign in, and signs every approve, deposit and withdrawal itself. The backend never receives a key and never signs for a user. | A Privy embedded wallet behind social login. **Not integrated** — but it slots in behind the signer interface in `frontend/src/lib/wallet.ts` without touching the challenge/verify exchange or the money path. |
 
-Investors get Privy wallets; strategies get Circle Agent Wallets. That is deliberate, not
-redundant — investors are humans who need consumer onboarding, strategies are autonomous
-agents that need programmatic, policy-capped ones.
+The distinction that matters: the enclave layer — the one the whole verifiability claim
+rests on — is real. The other two are local stand-ins written behind a single seam each,
+and the code says so where it stands in.
 
-## The value loop
+## How a number gets onto the page
 
-No performance figure is written by hand. APY is not a field — it falls out of the
-strategy's own decisions applied to a price series:
+Nothing about performance is stored as an input. It falls out of the strategy's own
+decisions applied to a price series:
 
 ```
-price oracle (seeded, deterministic)
-  -> GET /api/oracle/prices        [real HTTP call, made from inside the workflow]
-  -> cre workflow simulate         [the strategy's onTick() returns target weights]
-  -> backend prices the decision   [weights x price delta since last tick = pnl]
-  -> vault.applyPnl(int256)        [real transaction on-chain]
-  -> NAV snapshot
-  -> APY / total return / drawdown [computed from the NAV series]
+price oracle (seeded deterministic walk, backend)
+   -> GET /api/oracle/prices        [real HTTP call, made from inside the enclave]
+   -> cre workflow simulate         [the strategy's onTick() runs, returns target weights]
+   -> backend prices the decision   [weights x price delta since the last tick = pnl]
+   -> vault.applyPnl(int256)        [a real transaction on anvil]
+   -> NAV snapshot                  [a row in nav_snapshots]
+   -> APY / total return / drawdown [computed from the NAV series]
 ```
 
-A strategy that picks badly shows a negative APY because it lost money, not because a
-fixture says `-8.4`.
+A strategy that picks badly shows a negative return because its weights lost money, not
+because a column says so. A strategy nobody has ticked shows `—`, not zero.
 
-## Quickstart
+## Layout
 
-Requires Node 22+, [Foundry](https://book.getfoundry.sh/getting-started/installation) and
-the [CRE CLI](chainlink/SETUP.md).
+```
+contracts/    Foundry — MockUSDC, StrategyVault (one per strategy), StrategyRegistry
+backend/      Fastify + Drizzle + better-sqlite3 + viem — API, submission pipeline, tick loop
+frontend/     Next.js 15 (App Router) + Tailwind v4 — marketplace, strategy detail, portfolio, create flow
+chainlink/    The CRE workflow template, the strategy toolkit, and the example strategies
+shared/       types.ts and strategy-contract.ts — the contract all three build against
+docs/         Design intent, architecture, and the demo runbook
+```
+
+## Run it
+
+Full instructions, including what to expect at each step, are in
+**[docs/demo.md](docs/demo.md)**. The short version, in four terminals:
 
 ```bash
-git clone https://github.com/SauravKanchan/attesta.git
-cd attesta
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env    # set NEXT_PUBLIC_PRIVY_APP_ID
+# 1  the chain
+anvil --host 127.0.0.1 --port 8545 --chain-id 31337 --block-time 2
 
-./scripts/dev.sh                          # anvil + contracts + backend:4000 + frontend:3000
+# 2  the contracts (once per anvil)
+cd contracts && ./deploy-local.sh
+
+# 3  seed the marketplace — publishes three strategies through the real pipeline, ~3 min
+cd backend && npm run seed
+
+# 3  (same terminal, once the seed has finished) the API and the tick loop
+cd backend && npm run dev        # http://localhost:4000
+
+# 4  the UI
+cd frontend && npm run dev       # http://localhost:3000
 ```
 
-`dev.sh` brings the whole local stack up and tears every process down together on exit.
-Then open <http://localhost:3000>.
+Sign in with an anvil test account — the login screen lists them — and press **Add funds**
+on the portfolio page for test USDC.
 
-Useful while developing:
+First run only: `cd contracts && forge install`, and
+`bun install --cwd chainlink/strategy-runner` (the dependency set every generated workflow
+links against). Needs node ≥ 22, foundry, bun ≥ 1.2.21 and the CRE CLI on `PATH`.
+
+`npm run seed` publishes but does not tick, so a freshly seeded marketplace has no
+performance history — [give it one](docs/demo.md#2-give-the-demo-a-track-record--do-this-before-you-record)
+before demoing it.
+
+## Check it yourself
 
 ```bash
-npm run seed        --prefix backend   # publish demo strategies and run a few ticks
-npm run tick        --prefix backend -- <slug>   # drive a single scheduler tick by hand
-npm run verify:loop --prefix backend   # prove the whole loop: publish, deposit, 4 ticks, metrics
-npm test            --prefix backend
+cd contracts && forge test            # 47 tests, including 4 vault invariants
+cd backend   && npm test              # 116 tests — share math, metrics, tick pricing
+cd backend   && npm run verify:loop   # the whole loop end to end, against its own database
 ```
 
-## Repo layout
-
-```
-contracts/    Foundry — MockUSDC, StrategyVault, StrategyRegistry
-backend/      Fastify + Drizzle + better-sqlite3 + viem — API, scheduler, sanity pipeline
-frontend/     Next.js 15 (App Router) + Tailwind v4 — marketplace, strategy editor, portfolio
-chainlink/    CRE workflows — the strategy runner and the creator template
-shared/       types.ts, strategy-contract.ts — the contract all three build against
-```
-
-[`shared/types.ts`](shared/types.ts) and
-[`shared/strategy-contract.ts`](shared/strategy-contract.ts) are the machine-readable
-contract every layer builds against.
-
-## What is real, and what is not
-
-A verifiability claim is only worth what its weakest link is, so this is stated plainly
-rather than glossed.
-
-| Piece | Status |
-|---|---|
-| Strategy decisions | **Real.** `cre workflow simulate` runs the actual workflow, which makes a real HTTP call to the price oracle. |
-| Vault accounting, deposits, withdrawals, PnL | **Real transactions**, against a local anvil chain. |
-| Performance metrics | **Derived** from NAV snapshots the scheduler wrote. Never hardcoded. |
-| Browser-side signing | **Real.** The server never accepts a private key — sign-in is a challenge/verify signature exchange. |
-| Creator secret encryption | **Real flow, dev cipher.** Encrypted in the browser before it leaves; the production path is TDH2 to the Vault DON's threshold key, swapped at one seam. |
-| Live CRE confidential execution | **Blocked upstream.** Simulation passes and the workflow is deployed, but execution fails on Chainlink's side — see [SETUP.md](chainlink/SETUP.md#why-live-execution-fails). |
-| Circle Agent Wallets | **Stood in for locally** by an anvil EOA as the vault operator; Agent Wallets have no local runtime. |
-| Fiat onramp | **Mocked.** Privy's onramp routes through MoonPay, which does not support Arc testnet. |
-
-Two honest limits on the trust model itself: the Agent Wallet is Circle-managed rather than
-enclave-generated, so Circle is in the custody trust set; and Vault secrets are scoped to
-the platform owner rather than to a single workflow, so isolation between creators rests on
-every deployed workflow being enumerable and hash-checkable. Phase 1 also does not audit
-strategy code — *verified* means "this exact code produced these results", not "this code is
-safe".
-
-The TEE is **AWS Nitro Enclaves in `us-west-2`** and nothing else.
+`verify:loop` is the honest one: it publishes an example strategy through the real
+pipeline, checks the registry anchor is readable back under the id publish computed, ticks
+once with no depositors to prove settlement is skipped rather than faked, takes a real
+deposit, ticks three more times, and computes APY from the resulting NAV series. Nothing
+in it is stubbed, and it takes minutes because each tick really compiles the strategy to
+WASM and runs it in the enclave simulator.
 
 ## Docs
 
-| Document | What's in it |
+| File | What it covers |
 |---|---|
-| [docs/project-overview.md](docs/project-overview.md) | The platform, the actors, the architecture, the verifiability model, phase 1 scope |
-| [docs/build-plan.md](docs/build-plan.md) | The local implementation: contracts, API table, sanity pipeline, scheduler |
+| [docs/demo.md](docs/demo.md) | Bringing the stack up from cold, the demo click-path, the video script, and the local-vs-production boundary |
+| [docs/project-overview.md](docs/project-overview.md) | The actors, the verifiability model, the creator submission flow, and phase 1 scope |
+| [docs/build-plan.md](docs/build-plan.md) | The local implementation: contracts and their edge cases, auth, the API table, the sanity pipeline, the scheduler |
 | [docs/prizes.md](docs/prizes.md) | The three partner technologies and the constraints each imposes |
-| [docs/design/README.md](docs/design/README.md) | The design system and the factual constraints on UI copy |
-| [chainlink/SETUP.md](chainlink/SETUP.md) | CRE setup, deployment status, and why live execution currently fails |
+| [docs/design/README.md](docs/design/README.md) | The design system, and the factual constraints on UI copy |
+| [chainlink/SETUP.md](chainlink/SETUP.md) | CRE setup, the confidential path, and why live execution currently fails |
+| [contracts/README.md](contracts/README.md) | The three contracts and their invariants |
+
+## Honest limits
+
+- **The enclave path is proven in simulation, not in a deployed workflow.** Every live
+  execution on the `zone-a` DON fails with `DON members not set`, a platform-side
+  regression other teams hit at the same hour. `cre workflow simulate` runs the same
+  `handlerInTee` code path locally and is what the demo shows.
+- **Locally, secrets are encrypted with a `local-dev` scheme**, not TDH2 to the Vault DON.
+  The key never leaves the creator's browser, which reproduces the platform's ignorance of
+  the plaintext — but no enclave can read them either, so strategies fall back to their
+  documented defaults. `EncryptedSecret.scheme` is the seam.
+- **Circle Agent Wallets on Arc are not implemented, and Privy is not integrated.** A
+  strategy settles through an anvil EOA and an investor signs with a key held in the
+  browser. Both sit behind a seam meant for the real thing, and neither is dressed up as
+  the real thing anywhere in the UI.
+- **A verified strategy means "this exact code produced these results".** It is not a
+  judgement that the strategy is sound. Phase 1 does not audit uploaded code.
+- **Performance figures are minutes old on a local chain.** Annualising a few minutes of
+  NAV history produces absurd APYs; total return and the NAV series are the numbers to
+  read.
+- **The vault does not trade.** A tick's outcome is decided in the enclave and settled
+  as one signed delta, so share value tracks realised performance without the vault
+  holding positions.
