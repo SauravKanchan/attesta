@@ -147,8 +147,14 @@ Both are node-side state, not anything in this repo:
 
 - `DON members not set` is raised by `validateEnclaveSigners` in
   `chainlink-confidential-compute/capabilities/framework/executor.go`, which reads the node's
-  own `localNode.WorkflowDON.Members`. It is empty on the `zone-a` nodes, i.e. the
-  confidential-workflows capability is not provisioned for this tenant.
+  own `localNode.WorkflowDON.Members`. It is empty on the `zone-a` nodes.
+- It is a platform-wide regression, not an access problem. In the ETHGlobal
+  `#partner-chainlink` channel on 13 Sep 2026, a team whose production workflow had been
+  executing inside the enclave reported that every run started failing with this exact error
+  at **02:10 UTC** with no change on their side, and a second team whose org *already has*
+  Confidential Workflows access reported the same error on `private` / `zone-a`. Another team
+  had five successful `handlerInTee` executions using Vault DON secrets before the cut-off.
+  All of this project's executions happened after 02:10 UTC.
 - The gateway (`chainlink/core/services/gateway/handlers/confidentialrelay/handler.go`)
   returns `InvalidParams` carrying the node's message when nodes reject a *user* error. The
   generic `relay quorum unreachable` means 7 of 10 Vault relay nodes failed internally.
@@ -157,8 +163,9 @@ Both are node-side state, not anything in this repo:
 - `CRE_CLI_DON_FAMILY=zone-fips` is rejected by the registry
   (`DON family "zone-fips" is not supported`); `zone-a` is the only family available.
 
-Live execution should start working once Chainlink enrols the org in the beta. Nothing needs
-to change here.
+Live execution should start working once Chainlink fixes the DON-side enclave config (and,
+if still required, enrols the org in the beta — turnaround quoted as 24–48 h). Nothing needs
+to change here; re-check with `cre workflow get`.
 
 ## Useful commands
 
