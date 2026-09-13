@@ -60,7 +60,7 @@ Writes `contracts/deployments/local.json`, the address book everything else read
 }
 ```
 
-**Terminal 3 — seed the marketplace.** Takes roughly three minutes and prints its progress.
+**Terminal 3 — seed the marketplace.** Takes roughly six minutes and prints its progress.
 
 ```bash
 cd backend && npm run seed
@@ -70,8 +70,10 @@ This is not a fixture dump. It signs in over the same challenge/verify exchange 
 browser uses, POSTs three submissions, runs all nine sanity checks including a real
 `cre workflow build` and a real `cre workflow simulate`, deploys a `StrategyVault` per
 strategy, prefunds 250,000 USDC into each vault's reserve, and anchors each one in the
-`StrategyRegistry`. It wipes `backend/data/attesta.db` and the workflow workspace first,
-and it briefly binds port 4100 for its own server.
+`StrategyRegistry`. It finishes by giving the marketplace a track record — a real
+deposit and three enclave ticks, §2 — so what it hands you is recordable rather than
+merely correct. It wipes `backend/data/attesta.db` and the workflow workspace first, and
+it briefly binds port 4100 for its own server.
 
 You end up with three live strategies:
 
@@ -127,13 +129,10 @@ right tool for a fresh empty stack and the wrong tool for one that is already se
 
 ---
 
-## 2. Give the demo a track record — do this before you record
+## 2. The track record, and how to add to it
 
-A freshly seeded marketplace is honest and unimpressive: nobody has funded these
-strategies and nobody has run them, so every card shows `—` APY, "No NAV history" and an
-amber **Awaiting attestation** badge.
-
-Two things have to happen before the story lands:
+Publishing a strategy is not enough to look at. Two things have to happen before the story
+lands:
 
 1. **Somebody has to deposit.** `applyPnl` reverts `NoSharesOutstanding()` when
    `totalShares == 0`, so with no depositors the tick still runs and still writes a NAV
@@ -143,15 +142,50 @@ Two things have to happen before the story lands:
    backend records the decision source per tick and only the enclave path counts. A
    fallback decision taken in-process is never dressed up as an attested run.
 
-So, before recording: sign in, hit the faucet, allocate into a strategy (§3 steps 1–6),
-then get some ticks in. Two ways.
+**`npm run seed` now does both for you,** as its last phase, so a cold seed comes up
+record-ready: it signs in as anvil account #1, takes 5,000 USDC from the faucet, signs
+`approve` and `deposit` with that account's own key, records the deposit through
+`POST /strategies/churn/invest` against the receipt, and then ticks `churn` three times
+through the enclave. Tail of a real run:
 
-**Just wait.** The backend's loop ticks every live strategy every 60 s on its own. Three
-NAV points takes about four minutes and needs no intervention.
+```
+── track record: churn ──────────────────────────
+  investor        0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+  approve         0x7c4fa31bb73c5854a81085446fd4df3182f9e44fa252ecaf6006728c29816901
+  deposit         5000.000000 USDC -> 5000.000000 shares (tx 0x9cb7cbaf8100696a4d207c17ea990ed1f4166c85bc97a511ea7bed619928997d)
+  position        5000.000000 shares, cost basis 5000.000000 USDC
+  tick 1/3         ok  via cre-simulate  ENTER  navPerShare 0.997000
+  tick 2/3         ok  via cre-simulate  EXIT  navPerShare 0.994386
+  tick 3/3         ok  via cre-simulate  ENTER  navPerShare 0.991403
+```
 
-**Or drive them by hand**, which is faster and gives you a terminal worth filming. Run the
-backend with its own loop switched off first, so that two processes are not settling the
-same vault from one operator nonce:
+Which leaves `churn` on **return since inception −0.56%**, 4,957.02 USDC of AUM, one
+investor, a three-point NAV chart and a green badge — and leaves `mom` and `rev` amber,
+which is the contrast worth pointing at on camera.
+
+The knobs, all optional: `SEED_DEMO_SLUG` (default `churn`), `SEED_TICKS` (3),
+`SEED_MAX_TICKS` (12), `SEED_DEPOSIT_USDC` (5000), `SEED_INVESTOR_KEY` (anvil #1).
+`SEED_TRACK_RECORD=false` publishes and stops, which is the right thing when you only want
+the pipeline to run.
+
+`SEED_MAX_TICKS` is the ceiling on the extra ticks the phase will take while NAV has not
+moved. A strategy that is out of the market settles `applyPnl(0)` — a real tick that leaves
+NAV byte-identical — and a run made only of those reads on the card exactly like a strategy
+that never ran, so the phase keeps going until something settles.
+
+**To add to a record that already exists** — a second strategy ticked, or a database that
+went flat after an anvil restart and a re-seed — run the same phase on its own. It binds
+the API port for the duration, so stop the backend first:
+
+```bash
+cd backend && SEED_DEMO_SLUG=mom SEED_TICKS=1 npm run seed:track-record
+```
+
+### Driving ticks by hand
+
+You do not need this to record, but a terminal ticking a strategy live is the single best
+shot in the video. Run the backend with its own loop switched off first, so that two
+processes are not settling the same vault from one operator nonce:
 
 ```bash
 # terminal 3, instead of plain `npm run dev`
@@ -195,9 +229,10 @@ It is worth having this terminal visible during the recording.
 A tick takes 25–90 s, dominated by `cre workflow simulate`. Three ticks with a 30 s gap is
 about three minutes.
 
-**Pick `churn` for the demo.** `mom` and `rev` mostly HOLD on the seeded price walk, which
-means a flat NAV and no trades. `churn` (the overtrader) flips its whole book every tick,
-so it produces trades, pays the 30 bps venue cost on turnover, and moves NAV.
+**Why `churn` is the one the seed funds.** `mom` and `rev` mostly HOLD on the seeded price
+walk, which means a flat NAV and no trades. `churn` (the overtrader) flips its whole book
+every tick, so it produces trades, pays the 30 bps venue cost on turnover, and moves NAV.
+Tick the other two by all means, but lead with this one.
 
 ### APY reads as unavailable, and that is the point
 
@@ -223,35 +258,43 @@ Return since inception separates the strategies cleanly — one down 1.4%, anoth
 That reframes the strongest objection to the whole category — *anyone can claim 40% APY* —
 as something the product actively refuses to do. Do not apologise for the dash.
 
-If you want a real APY on camera, the strategies need six hours of ticks behind them. That
-is the only way to get one honestly.
+**Do not try to tick your way to an APY before recording.** Clearing the six-hour floor
+gets you a number, not a trustworthy one: a year is 1460 six-hour windows, so the exponent
+still saturates. Measured against the seeded run, replayed over exactly six hours, all
+three strategies report **−100.00% APY** — `churn` at Sharpe −195, `mom` at −67.51, `rev`
+at −12.60 — while their honest returns over the same series are −27.76%, −7.57% and
+−1.23%. The floor postpones the artefact; it does not remove it. The annualisation only
+stops saturating at roughly a month of NAV history, which no demo is going to accumulate.
+
+So the dash is not a state to escape before recording. It is the state to record.
 
 ---
 
 ## 3. The click path
 
-Anvil test account **#1** is the demo investor. It is pre-funded with 10,000 ETH for gas
-and it is not the deployer, so it never races the platform's nonce:
+The demo investor is whoever signs in through Privy. There is no key to paste and none to
+read out on camera: Privy creates an embedded wallet for the account you sign in with, and
+attesta funds that address from the deployer on the first sign-in.
 
-```
-address      0x70997970C51812dc3A010C7d01b50e0d17dc79C8
-private key  0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
-```
-
-The login screen lists it, so you never have to paste a key on camera.
+The seeded track record is a separate, pre-existing position held by anvil account #1
+(`0x70997970C51812dc3A010C7d01b50e0d17dc79C8`), written server-side by `npm run seed` — it
+is what gives `churn` a curve before you touch anything, not an account you sign in as.
 
 **1. Landing — http://localhost:3000**
 Public, no session. "Performance you can verify instead of performance you're told about."
 Click **Browse strategies**.
 
 **2. Sign in — /login**
-Click the row labelled **#1 0x7099…79C8**, then **Sign in**.
-What happens: the browser derives the address locally, `POST /auth/challenge` returns a
-nonce and a SIWE-style message, the browser signs it with viem, `POST /auth/verify`
-recovers the signer and issues a session. The private key never leaves the tab. This
-screen is the stand-in for Privy's embedded wallet and it says so at the bottom.
+Click **Sign in with Privy** and finish in Privy's modal — email, Google, a passkey, or a
+wallet you already hold.
+What happens: Privy provisions an embedded wallet and hands over its address,
+`POST /auth/challenge` returns a nonce and a SIWE-style message, the embedded wallet signs
+it, `POST /auth/verify` recovers the signer and issues a session. No key crosses the wire;
+the API has no endpoint that would take one. attesta then calls the faucet so the new
+wallet has gas and USDC before you reach the marketplace.
 
-![Sign in with an anvil test account](screenshots/01-login-anvil-account.png)
+The login screenshots under `screenshots/` still show the removed pasted-key screen and
+need reshooting against the Privy sign-in.
 
 **3. Marketplace — /**
 Three cards. Each one carries a live verification badge and the first bytes of its binary
@@ -420,17 +463,16 @@ Do not blur this. Judges will ask, and the honest version is more convincing.
 > the deposits and withdrawals, and every number on the screen.
 >
 > Standing in for production: the strategy operator is an anvil EOA where it would be a
-> Circle Agent Wallet on Arc, the investor signs with a test key held in the browser where
-> Privy's embedded wallet would sign, the secret scheme is `local-dev` where it would be
-> TDH2 to the Vault DON, and the backend owns the tick interval where a deployed workflow's
-> cron trigger would.
+> Circle Agent Wallet on Arc, the secret scheme is `local-dev` where it would be TDH2 to
+> the Vault DON, and the backend owns the tick interval where a deployed workflow's cron
+> trigger would.
 
 Say the strong version of that rather than the soft one. **Circle Agent Wallets are not
-implemented and Privy is not integrated** — the settlement layer is a vault on a local
-chain and the investor signer is a key in the browser. Each sits behind one seam
-(`ChainPort` for the operator, `frontend/src/lib/wallet.ts` for the signer) and neither is
-presented as the real thing anywhere in the UI. What *is* real is the layer the whole
-claim rests on: the strategy compiled, measured and run through CRE's enclave path.
+implemented** — the settlement layer is a vault on a local chain, driven by an anvil EOA
+behind the `ChainPort` seam, and it is not presented as the real thing anywhere in the UI.
+The investor signer is not a stand-in: Privy's embedded wallet is the only way into the
+app, and it signs the challenge and every transaction. What else is real is the layer the
+whole claim rests on: the strategy compiled, measured and run through CRE's enclave path.
 
 ---
 
@@ -447,7 +489,7 @@ Have this on hand for questions.
 | Creator parameters | encrypted in the browser, `local-dev` AES-256-GCM, key never leaves the tab; the enclave therefore reads an empty secret and each strategy falls back to its documented default | TDH2 to the Vault DON threshold key; released only into an attested enclave |
 | Price data | seeded deterministic walk served by `GET /api/oracle/prices`, fetched *from inside* the simulated enclave over HTTP | a real venue or data feed over the enclave's confidential HTTP client |
 | Strategy wallet | anvil EOA per strategy, funded by the deployer, `operator` on the vault | Circle Agent Wallet on Arc with a spending policy, directed from inside the enclave — **designed for, not built** |
-| Investor wallet | private key held in the browser, signs the challenge and every transaction | Privy embedded wallet behind social login — same signer interface, same challenge/verify exchange, **not integrated yet** |
+| Investor wallet | Privy embedded wallet behind social login, signs the challenge and every transaction in the browser | unchanged — the same wallet against a public chain rather than local anvil |
 | Settlement | `StrategyVault` on anvil, MockUSDC, 6 dp | USDC on Arc |
 | Trades | `recordTrade` events priced off the oracle walk; the vault does not swap | real venue execution on Arc |
 | Signed reports | `donRuntime.report(...)` runs in the simulator | consensus-signed reports from the DON |
@@ -467,8 +509,15 @@ Nitro Enclaves in us-west-2 and nothing else.
 ## 6. Troubleshooting
 
 **Every card says "Awaiting attestation" and APY is `—`.**
-No strategy has ticked yet. See §2. One tick is enough for the badge; two NAV snapshots
-more than 60 s apart are needed before APY, total return and drawdown are non-null.
+No strategy has ticked yet — after a seed, `churn` should be green and only `mom` and
+`rev` amber, so all three amber means the seed's track record phase was skipped or failed.
+Its log line is the last thing `npm run seed` prints; `npm run seed:track-record` runs it
+again on its own. See §2. One tick is enough for the badge, and two NAV
+snapshots at any spacing are enough for total return and max drawdown — neither annualises
+anything, so neither is gated on how long the series is. APY and Sharpe are the two that
+are, and they stay `—` until the series spans `MIN_ANNUALISE_MS`
+(`backend/src/lib/annualise.ts`). A dash there is the designed answer, not a fault to
+chase: see §2.
 
 **NAV never moves even though ticks succeed.**
 Nobody has deposited, so `applyPnl` is skipped — the vault refuses to book a gain that has
@@ -508,7 +557,7 @@ and the bound; `curl` the same URL to see it.
 ## 7. Reset
 
 ```bash
-cd backend && npm run seed     # wipes the db and the workflow workspace, re-publishes all three
+cd backend && npm run seed     # wipes the db and the workspace, re-publishes all three, re-funds and re-ticks churn
 ```
 
 If anvil has been restarted, redeploy the contracts first (`cd contracts &&

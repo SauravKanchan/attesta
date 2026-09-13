@@ -27,9 +27,8 @@ Stopped deliberately: the screenshot workflow. The images are already uploaded.
 
 ## The two things that could still change the pitch
 
-1. **Privy** — not integrated as of the last check. If it lands, submit to Chainlink and
-   Privy. If not, submit to **Chainlink only** and do not tick the Privy box; one honest
-   track beats two where one is empty.
+1. **Privy** — integrated, and now the only way to sign in; the pasted-key path is gone.
+   Submit to Chainlink and Privy.
 2. **Reseed** — before it, all three strategies read negative because six schedulers were
    double-settling the same vaults. After it, at least one should be up. If everything is
    still negative on a clean run that is a real finding about the price series, not

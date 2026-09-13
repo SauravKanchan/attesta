@@ -78,17 +78,16 @@ anywhere to report it.
 
 ## Authentication and signing
 
-The user's private key never reaches the server, and the backend never signs on a user's
-behalf. This is deliberate: Privy's embedded wallet gives the browser a signer, so if the
-backend held keys now, swapping Privy in later would mean rewriting the whole money path
-rather than replacing one function.
+No key reaches the server, and the backend never signs on a user's behalf. Privy's
+embedded wallet is the browser's only signer: there is no pasted-key path, and the API has
+no endpoint that would accept a key.
 
 **Sign in** proves control of an address:
 
 ```
 browser                                     backend
-  paste private key (or pick an anvil test account)
-  derive address locally
+  sign in with Privy (email, Google, passkey, or a connected wallet)
+  Privy hands over an embedded wallet and its address
   POST /auth/challenge {address}  ─────────▶  issue a nonce, store it
   sign the message with viem                  ◀─ {message, nonce}
   POST /auth/verify {address, signature} ──▶  recoverMessageAddress, compare, issue a session
@@ -148,8 +147,9 @@ backend: fetch the receipt, parse the Deposited event, verify it came from the c
 The backend records what the chain says happened rather than what the client claims, so a
 forged or replayed hash records nothing. The same shape applies to withdrawal.
 
-Gas: anvil accounts are pre-funded. A wallet created by pasting an unfunded key is topped
-up from the deployer account through `POST /wallet/faucet`, which also mints USDC.
+Gas: a fresh embedded wallet holds nothing, so the first sign-in tops it up from the
+deployer account through `POST /wallet/faucet`, which also mints USDC. The portfolio page
+offers the same call as **Add funds**.
 
 ## API
 
@@ -227,11 +227,13 @@ and swaps in at the same seam: `EncryptedSecret.scheme`.
 
 `POST /submissions/:id/secrets` takes an envelope and nothing else — `<scheme>.v1.` then
 that scheme's base64 parts — and refuses a value of any other shape, whichever scheme it
-claims. The route is the only way a parameter enters the platform, so this is where the
-"ciphertext only" claim is enforced rather than merely stated.
+claims. `backend/src/lib/secret-envelope.ts` is the rule: the scheme tag must match the
+declared scheme, the part count must be the count that scheme emits, each part must be
+canonical base64, and each must decode to a size the cipher forces. The route is the only
+way a parameter enters the platform, so this is where the "ciphertext only" claim is
+enforced rather than merely stated.
 
 ## Out of scope locally
 
-Circle Agent Wallets (no local runtime), Privy (a pasted key supplies the browser's
-signer in its place, behind the same challenge/verify exchange), live CRE
+Circle Agent Wallets (no local runtime), live CRE
 deployment (blocked by a platform regression — see [chainlink/SETUP.md](../chainlink/SETUP.md)).

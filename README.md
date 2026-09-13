@@ -45,7 +45,7 @@ implemented.
 |---|---|---|
 | **Compute** | **Chainlink CRE, for real.** Each strategy is generated as a confidential workflow whose cron handler is registered with `cre.handlerInTee(..., [{ tee: 'nitro', regions: ['us-west-2'] }])`. It reads its parameters through the Vault DON API, fetches prices over the enclave's own HTTP client, and crosses back to the DON to sign the decision. Exercised through `cre workflow build` and `cre workflow simulate`. | The same workflow deployed to the Workflow DON, scheduled by its cron trigger. Live execution is currently blocked by a Chainlink-side regression — [chainlink/SETUP.md](chainlink/SETUP.md). |
 | **Settlement** | A `StrategyVault` per strategy on a local anvil chain, denominated in a 6-decimal MockUSDC. The vault's `operator` — the account that settles a tick — is an anvil EOA the backend funds and holds the key for. | Circle Agent Wallets on Arc, policy-capped and directed from inside the enclave. **Designed for, not built.** |
-| **Distribution** | A private key held in the browser: it derives the address, signs the server's nonce to sign in, and signs every approve, deposit and withdrawal itself. The backend never receives a key and never signs for a user. | A Privy embedded wallet behind social login. **Not integrated** — but it slots in behind the signer interface in `frontend/src/lib/wallet.ts` without touching the challenge/verify exchange or the money path. |
+| **Distribution** | **Privy, for real.** Signing in means email, Google, a passkey or a connected wallet; Privy provisions an embedded wallet, and that wallet signs the server's nonce to sign in and signs every approve, deposit and withdrawal itself. It is the only way in — the backend never receives a key, never signs for a user, and has no endpoint that would accept one. | The same wallet against a public chain rather than local anvil. |
 
 The distinction that matters: the enclave layer — the one the whole verifiability claim
 rests on — is real. The other two are local stand-ins written behind a single seam each,
@@ -150,10 +150,10 @@ WASM and runs it in the enclave simulator.
   The key never leaves the creator's browser, which reproduces the platform's ignorance of
   the plaintext — but no enclave can read them either, so strategies fall back to their
   documented defaults. `EncryptedSecret.scheme` is the seam.
-- **Circle Agent Wallets on Arc are not implemented, and Privy is not integrated.** A
-  strategy settles through an anvil EOA and an investor signs with a key held in the
-  browser. Both sit behind a seam meant for the real thing, and neither is dressed up as
-  the real thing anywhere in the UI.
+- **Circle Agent Wallets on Arc are not implemented.** A strategy settles through an anvil
+  EOA that the backend funds and holds the key for. It sits behind a seam meant for the
+  real thing (`ChainPort`) and is not dressed up as the real thing anywhere in the UI. The
+  investor half *is* real: Privy's embedded wallet is the only signer the browser has.
 - **A verified strategy means "this exact code produced these results".** It is not a
   judgement that the strategy is sound. Phase 1 does not audit uploaded code.
 - **Performance figures are minutes old on a local chain.** Annualising a few minutes of

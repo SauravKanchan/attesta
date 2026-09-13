@@ -8,7 +8,7 @@ hand-written React.
 |---|---|---|
 | `01-landing.png` | Public landing page | Final |
 | `02-marketplace.png` | Marketplace browse | Final, after corrections |
-| `00-signin.png` | Sign in | Superseded — being replaced by Privy, do not invest in it |
+| `00-signin.png` | Sign in | Superseded — the shipped screen is Privy's sign-in, do not invest in it |
 | `03-create-strategy-step1.png` | Create strategy, step 1 (Code) | Final |
 
 Screens with no reference image — strategy detail (un-invested and invested), portfolio,

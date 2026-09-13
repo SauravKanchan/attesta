@@ -190,9 +190,17 @@ Swapping schemes replaces one function — `encryptValue` — and the scheme tag
 
 Both envelopes are the same shape — the scheme name, a version, then that scheme's base64
 parts — and `POST /submissions/:id/secrets` refuses anything that is not one, under either
-scheme. That refusal is what makes "the platform holds no readable value" checkable rather
-than asserted: an API key, a hex blob and a passphrase are all opaque strings, so a rule
-that only asked whether a value looked opaque would quietly accept every one of them.
+scheme. `backend/src/lib/secret-envelope.ts` holds the rule and checks four things: the
+scheme tag matches the scheme the caller declared, the number of parts is the number that
+scheme emits (two for `local-dev`, three for TDH2), every part is canonical base64, and
+each part decodes to a size that scheme's cryptography forces — a 12-byte AES-GCM nonce,
+and a ciphertext no shorter than the 16-byte tag.
+
+Checking all four is what makes "the platform holds no readable value" enforced rather
+than asserted. An API key, a hex blob and a passphrase are all opaque strings, and so is
+a passphrase with `local-dev.v1.` typed in front of it, so a rule that only asked whether
+a value looked opaque — or only that it was punctuated like an envelope — would quietly
+accept every one of them.
 
 The honest limitation, which the create screen states rather than glosses: under
 `local-dev` the key never leaves the creator's browser, so no enclave can read the

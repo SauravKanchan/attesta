@@ -156,9 +156,9 @@ integrated today.
 The server never accepts a private key. Sign-in is a challenge/verify exchange: the browser
 asks for a nonce, signs the SIWE-style message the server built, and the server recovers the
 address with recoverMessageAddress and issues a session. Nonces are single-use with a
-five-minute TTL. This shape was chosen specifically so that swapping a pasted dev key for
-Privy's embedded wallet replaces one function — where the browser's signer comes from — and
-leaves the protocol untouched. Investing and withdrawing are signed in the browser too, and
+five-minute TTL. This shape was chosen specifically so that the browser's signer is one
+replaceable function and the protocol is untouched by which wallet fills it; Privy's
+embedded wallet fills it today, and it is the only thing that does. Investing and withdrawing are signed in the browser too, and
 the backend records what the chain says happened rather than what the client claims: it
 fetches the receipt, parses the Deposited event, and checks it came from the caller's
 address and targets this strategy's vault. A forged or replayed hash records nothing.
