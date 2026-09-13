@@ -25,7 +25,7 @@ export function RequiredExportsChecklist({ source, className }: RequiredExportsC
 		<div className={cn('flex flex-col rounded-sm border border-hairline bg-surface-1', className)}>
 			<div className="flex items-center justify-between gap-3 border-b border-hairline px-3 py-2.5">
 				<h3 className="type-label-caps text-fg-secondary">Required exports</h3>
-				<Tag tone={complete ? 'verified' : 'warning'} mono>
+				<Tag tone={complete ? 'verified' : 'warning'} mono className="whitespace-nowrap">
 					{present} / {states.length} valid
 				</Tag>
 			</div>

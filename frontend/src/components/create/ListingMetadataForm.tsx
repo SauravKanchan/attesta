@@ -93,7 +93,13 @@ export function ListingMetadataForm({ value, onChange, errors }: ListingMetadata
 										: 'border-hairline bg-surface-2 text-fg-secondary hover:bg-interact hover:text-fg',
 								)}
 							>
-								{selected ? <CheckIcon className="size-3" /> : <span className="text-fg-muted">+</span>}
+								{selected ? (
+									<CheckIcon className="size-3" />
+								) : (
+									<span aria-hidden="true" className="text-fg-muted">
+										+
+									</span>
+								)}
 								{option.label}
 							</button>
 						)

@@ -47,6 +47,11 @@ deployments.local.json
 *.log
 logs/
 
+# Playwright: the browser runs are reproducible, their artefacts are not worth carrying.
+**/test-results/
+**/playwright-report/
+frontend/e2e/.artifacts/
+
 # The global gitignore excludes [Ss]cripts; this project keeps script directories.
 !**/scripts/
 !**/scripts/**

@@ -14,6 +14,7 @@ import { MyStrategiesTable } from '@/components/portfolio/MyStrategiesTable'
 import { PortfolioSummaryTiles } from '@/components/portfolio/PortfolioSummaryTiles'
 import { PortfolioValueChart } from '@/components/portfolio/PortfolioValueChart'
 import { WithdrawModal } from '@/components/portfolio/WithdrawModal'
+import { unitsOrZero } from '@/components/portfolio/units'
 import { ApiError, getPortfolio, listStrategies, requestFaucet } from '@/lib/api'
 import type { Portfolio, Position, StrategySummary } from '@/lib/types'
 
@@ -25,7 +26,7 @@ type TabValue = 'investments' | 'created'
  * id — there is no per-creator endpoint, and inventing one metric locally to avoid a
  * second request would put an unattested number on the page.
  */
-const STRATEGY_PAGE_SIZE = 200
+const STRATEGY_PAGE_SIZE = 100
 
 export default function PortfolioPage() {
 	const { user } = useAuth()
@@ -39,21 +40,34 @@ export default function PortfolioPage() {
 	const [withdrawing, setWithdrawing] = useState<Position | null>(null)
 	const [faucetPending, setFaucetPending] = useState(false)
 
+	// The two calls are settled separately: the listing only decorates the tables, so a
+	// failure there must not take down the balances and the faucet, which are what an
+	// investor with an empty wallet is on this page for.
 	const load = useCallback(async () => {
 		setError(null)
-		try {
-			const [nextPortfolio, listing] = await Promise.all([
-				getPortfolio(),
-				listStrategies({ limit: STRATEGY_PAGE_SIZE }),
-			])
-			setPortfolio(nextPortfolio)
-			setStrategies(listing.strategies)
-		} catch (caught) {
-			console.error('attesta: loading the portfolio failed', caught)
-			setError(caught instanceof ApiError ? caught.message : 'The portfolio could not be loaded')
-		} finally {
-			setLoading(false)
+		const [portfolioResult, listingResult] = await Promise.allSettled([
+			getPortfolio(),
+			listStrategies({ limit: STRATEGY_PAGE_SIZE }),
+		])
+
+		if (portfolioResult.status === 'fulfilled') {
+			setPortfolio(portfolioResult.value)
+		} else {
+			console.error('attesta: loading the portfolio failed', portfolioResult.reason)
+			setError(
+				portfolioResult.reason instanceof ApiError
+					? portfolioResult.reason.message
+					: 'The portfolio could not be loaded',
+			)
 		}
+
+		if (listingResult.status === 'fulfilled') {
+			setStrategies(listingResult.value.strategies)
+		} else {
+			console.error('attesta: loading the strategy listing failed', listingResult.reason)
+		}
+
+		setLoading(false)
 	}, [])
 
 	useEffect(() => {
@@ -71,7 +85,12 @@ export default function PortfolioPage() {
 		return strategies.filter((strategy) => strategy.creator.id === user.id)
 	}, [strategies, user])
 
-	const positions = portfolio?.positions ?? []
+	// A fully redeemed position stays on the wire as a zero-share row so its history
+	// survives; there is nothing left to withdraw from, so it leaves the table.
+	const positions = useMemo(
+		() => (portfolio?.positions ?? []).filter((position) => unitsOrZero(position.shares) > 0n),
+		[portfolio],
+	)
 
 	async function runFaucet() {
 		setFaucetPending(true)

@@ -20,6 +20,7 @@
 // spinner. `GET /submissions/:id` returns the same state for anyone who would rather poll.
 
 import { randomUUID } from 'node:crypto'
+import type { OutgoingHttpHeaders } from 'node:http'
 import { asc, eq } from 'drizzle-orm'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
@@ -28,7 +29,13 @@ import {
 	CHECK_ORDER,
 	makeCheck,
 } from '../../../chainlink/strategy-toolkit/src/index.js'
-import type { SanityCheck, StrategyDetail, StrategyStatus, SubmissionDraft } from '../../../shared/types.js'
+import type {
+	EncryptedSecret,
+	SanityCheck,
+	StrategyDetail,
+	StrategyStatus,
+	SubmissionDraft,
+} from '../../../shared/types.js'
 import { db } from '../db/index.js'
 import { secrets, strategies, submissions, type SubmissionRow } from '../db/schema.js'
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js'
@@ -87,16 +94,16 @@ const patchBody = z
 const idParams = z.object({ id: z.string().trim().min(1).max(64) })
 
 /**
- * The `local-dev` envelope the browser produces: `local-dev.v1.<base64 iv>.<base64 body>`.
- * A plaintext parameter cannot accidentally look like this, which is the point.
+ * Every scheme posts the same self-describing envelope: the scheme, a version, and then
+ * that scheme's base64 parts — `local-dev.v1.<iv>.<ciphertext>`, and for TDH2 the nonce
+ * and the two ciphertexts. A stored blob therefore announces how to read itself, and no
+ * scheme is checked more loosely than another.
+ *
+ * Requiring the whole envelope, rather than asking whether a value merely looks opaque,
+ * is what makes the refusal real: an API key, a hex string and a passphrase are all
+ * opaque, and any test that admits them admits a readable secret into the platform.
  */
-const LOCAL_DEV_ENVELOPE = /^local-dev\.v\d+\.[A-Za-z0-9+/]{8,}={0,2}\.[A-Za-z0-9+/]{16,}={0,2}$/
-
-/** Base64, base64url or hex, and nothing that reads as a sentence. */
-const OPAQUE = /^[A-Za-z0-9+/=_-]+$/
-
-/** AES-GCM's tag alone is 16 bytes, so a real envelope is never shorter than this. */
-const MIN_CIPHERTEXT_CHARS = 24
+const ENVELOPE = /^(?:local-dev|tdh2-p256-aesgcm)\.v\d+(?:\.[A-Za-z0-9+/]{8,}={0,2}){2,4}$/
 
 const secretsBody = z
 	.array(
@@ -290,12 +297,21 @@ async function streamChecks(
 
 	// Written straight to the socket: the point of this route is that each line lands as its
 	// check resolves, which a buffered JSON response cannot do.
+	//
+	// Hijacking takes the reply away from Fastify before it flushes, so the headers its
+	// hooks have already computed — CORS above all — have to be carried onto the raw
+	// response by hand. Without them the browser blocks the whole response and the
+	// creator watches nine checks that never arrive, while the server logs a run that
+	// completed. The stream's own headers are written last so they win.
 	reply.hijack()
-	reply.raw.writeHead(200, {
-		'content-type': 'application/x-ndjson; charset=utf-8',
-		'cache-control': 'no-store',
-		connection: 'keep-alive',
-	})
+	const headers: OutgoingHttpHeaders = {}
+	for (const [name, value] of Object.entries(reply.getHeaders())) {
+		if (value !== undefined) headers[name] = value
+	}
+	headers['content-type'] = 'application/x-ndjson; charset=utf-8'
+	headers['cache-control'] = 'no-store'
+	headers.connection = 'keep-alive'
+	reply.raw.writeHead(200, headers)
 
 	let aborted = false
 	const onClose = () => {
@@ -404,18 +420,10 @@ function failingCheck(checks: readonly SanityCheck[]): SanityCheck | null {
  * test rather than a guess at whether the text is "secret-looking": an envelope the
  * browser produced always matches, and anything a person typed never does.
  */
-function plaintextComplaint(ciphertext: string, scheme: 'tdh2-p256-aesgcm' | 'local-dev'): string | null {
+function plaintextComplaint(ciphertext: string, scheme: EncryptedSecret['scheme']): string | null {
 	if (/\s/.test(ciphertext)) return 'it contains whitespace'
-	if (scheme === 'local-dev') {
-		return LOCAL_DEV_ENVELOPE.test(ciphertext)
-			? null
-			: 'it is not a local-dev.v1.<iv>.<ciphertext> envelope'
-	}
-	if (!OPAQUE.test(ciphertext)) return 'it is not base64 or hex'
-	if (ciphertext.length < MIN_CIPHERTEXT_CHARS) {
-		return `it is shorter than ${MIN_CIPHERTEXT_CHARS} characters, which no envelope can be`
-	}
-	return null
+	if (!ENVELOPE.test(ciphertext)) return `it is not a ${scheme}.v1.<base64>.<base64> envelope`
+	return ciphertext.startsWith(`${scheme}.`) ? null : `its envelope was not produced by ${scheme}`
 }
 
 function requireOwnedSubmission(request: FastifyRequest, id: string): SubmissionRow {

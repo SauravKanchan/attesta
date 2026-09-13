@@ -111,14 +111,20 @@ export function CreateStrategyFlow({ template }: CreateStrategyFlowProps) {
 	async function continueFromCode() {
 		const errors = validateMetadata(metadata)
 		setMetadataErrors(errors)
-		if (Object.keys(errors).length > 0) {
-			setStepError('Complete the listing details before continuing')
-			return
-		}
+		// Every blocker at once. Reporting the first one and stopping tells a creator
+		// whose code and listing are both incomplete to fix the listing, while the
+		// checklist beside them is red about an export the message never mentions.
+		const blockers: string[] = []
 		if (!exportsComplete) {
-			setStepError(
-				`Still missing ${missingExports.map((state) => state.signature).join(', ')} from the strategy interface`,
+			blockers.push(
+				`still missing ${missingExports.map((state) => state.signature).join(', ')} from the strategy interface`,
 			)
+		}
+		if (Object.keys(errors).length > 0) blockers.push('the listing details are incomplete')
+		if (blockers.length > 0) {
+			const [first, ...rest] = blockers
+			const message = [(first as string).charAt(0).toUpperCase() + (first as string).slice(1), ...rest].join(', and ')
+			setStepError(message)
 			return
 		}
 		setBusy(true)

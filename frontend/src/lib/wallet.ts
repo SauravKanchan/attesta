@@ -21,6 +21,7 @@ import {
 	BaseError,
 	ContractFunctionRevertedError,
 	createWalletClient,
+	formatEther,
 	formatUnits,
 	getAddress as toChecksumAddress,
 	http,
@@ -29,7 +30,7 @@ import {
 	type Address,
 	type Chain,
 	type Hex,
-	type HttpTransport,
+	type Transport,
 	type WalletClient,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
@@ -165,9 +166,9 @@ export class WalletError extends Error {
 
 /* ── The signer ──────────────────────────────────────────── */
 
-export type SignerKind = 'local-key'
+export type SignerKind = 'local-key' | 'privy'
 
-export type BrowserWalletClient = WalletClient<HttpTransport, Chain, Account>
+export type BrowserWalletClient = WalletClient<Transport, Chain, Account>
 
 export interface Signer {
 	/** Which implementation this is. A Privy signer would report its own kind. */
@@ -339,11 +340,56 @@ function parseAmount(value: string, decimals: number, label: string): bigint {
 	return units
 }
 
+/** Gas costs are fractions of an ETH; three significant digits is enough to compare them. */
+const ethFormat = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 3 })
+
 /**
- * A wallet with no ETH cannot send approve or deposit, and the node's own message for
- * that is unreadable. Checked before signing so the user is told what is actually wrong.
+ * Gas each write burns on the deployed contracts, taken from real receipts on this chain
+ * — approve 46,330, deposit 74,041, withdraw 55,969 — and rounded up to the next 10k so
+ * a first-time depositor writing cold storage is still covered. Only the units are fixed:
+ * what they cost is priced off the chain's own fee, below.
  */
-async function assertGas(chain: ResolvedChain, address: Address): Promise<void> {
+export const GAS_UNITS = {
+	approve: 50_000n,
+	deposit: 80_000n,
+	withdraw: 60_000n,
+} as const
+
+/** An allocation is two transactions: the approve, then the deposit. */
+export const DEPOSIT_GAS_UNITS = GAS_UNITS.approve + GAS_UNITS.deposit
+
+/**
+ * What `units` of gas cost right now, in wei, at the fee the chain quotes. Returns null
+ * when the node will not quote one: no warning is better than a warning built on a number
+ * nobody supplied.
+ */
+export async function gasFloor(units: bigint): Promise<bigint | null> {
+	try {
+		const chain = await loadChain()
+		const fees = await chain.publicClient.estimateFeesPerGas()
+		const perGas = fees.maxFeePerGas ?? (await chain.publicClient.getGasPrice())
+		return perGas * units
+	} catch (error) {
+		console.error('attesta: could not price gas against the chain', { units: units.toString(), error })
+		return null
+	}
+}
+
+/**
+ * The ETH an allocation needs before it can be signed at all. The portfolio page warns
+ * against this figure so an empty tank is named up front rather than surfacing as a
+ * failed approve that reads like a contract bug.
+ */
+export function depositGasFloor(): Promise<bigint | null> {
+	return gasFloor(DEPOSIT_GAS_UNITS)
+}
+
+/**
+ * A wallet that cannot pay for the transaction is told so before it signs, because the
+ * node's own message for it is unreadable. `units` is what this particular flow burns,
+ * so a withdrawal is not blocked by the cost of a deposit it is not making.
+ */
+async function assertGas(chain: ResolvedChain, address: Address, units: bigint): Promise<void> {
 	let balance: bigint
 	try {
 		balance = await chain.publicClient.getBalance({ address })
@@ -355,6 +401,13 @@ async function assertGas(chain: ResolvedChain, address: Address): Promise<void> 
 		throw new WalletError(
 			'no-gas',
 			'This wallet holds no ETH, so it cannot pay for the transaction. Use Add funds on the portfolio page to top it up.',
+		)
+	}
+	const floor = await gasFloor(units)
+	if (floor !== null && balance < floor) {
+		throw new WalletError(
+			'no-gas',
+			`This wallet holds ${ethFormat.format(Number(formatEther(balance)))} ETH but the transaction costs about ${ethFormat.format(Number(formatEther(floor)))} ETH in gas. Use Add funds on the portfolio page to top it up.`,
 		)
 	}
 }
@@ -444,7 +497,10 @@ async function submit(chain: ResolvedChain, operation: string, send: () => Promi
  *
  * Each write is simulated first: the simulation is what turns a revert into the vault's
  * own custom error rather than an opaque send failure, and it fails before a nonce is
- * consumed.
+ * consumed. The simulation is run as the wallet client's own account, so the request it
+ * hands to `writeContract` is signed by whoever the signer is — the key in this browser,
+ * or the provider behind an embedded wallet — rather than being posted to the node as a
+ * `from` address for it to sign, which only a node holding that key could honour.
  */
 export async function investInStrategy(vaultAddress: string, amount: string): Promise<Hex> {
 	const signer = requireSigner()
@@ -452,14 +508,14 @@ export async function investInStrategy(vaultAddress: string, amount: string): Pr
 	const vault = toChecksumAddress(vaultAddress)
 	const assets = parseAmount(amount, chain.usdcDecimals, 'an amount in USDC')
 
-	await assertGas(chain, signer.address)
+	await assertGas(chain, signer.address, DEPOSIT_GAS_UNITS)
 	await assertUsdc(chain, signer.address, assets)
 
 	const wallet = await signer.walletClient()
 
 	await submit(chain, 'approving the vault', async () => {
 		const { request } = await chain.publicClient.simulateContract({
-			account: signer.address,
+			account: wallet.account,
 			address: chain.usdc,
 			abi: usdcAbi,
 			functionName: 'approve',
@@ -470,7 +526,7 @@ export async function investInStrategy(vaultAddress: string, amount: string): Pr
 
 	return submit(chain, 'depositing into the vault', async () => {
 		const { request } = await chain.publicClient.simulateContract({
-			account: signer.address,
+			account: wallet.account,
 			address: vault,
 			abi: vaultAbi,
 			functionName: 'deposit',
@@ -487,12 +543,12 @@ export async function withdrawFromStrategy(vaultAddress: string, shares: string)
 	const vault = toChecksumAddress(vaultAddress)
 	const units = parseAmount(shares, chain.usdcDecimals, 'a number of shares')
 
-	await assertGas(chain, signer.address)
+	await assertGas(chain, signer.address, GAS_UNITS.withdraw)
 
 	const wallet = await signer.walletClient()
 	return submit(chain, 'withdrawing from the vault', async () => {
 		const { request } = await chain.publicClient.simulateContract({
-			account: signer.address,
+			account: wallet.account,
 			address: vault,
 			abi: vaultAbi,
 			functionName: 'withdraw',

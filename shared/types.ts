@@ -147,7 +147,7 @@ export interface Position {
 	strategySlug: string
 	creatorUsername: string
 	shares: string
-	/** Sum of deposits minus withdrawals, 6dp. */
+	/** USDC still allocated: deposits, less the basis the redeemed shares carried. 6dp. */
 	costBasis: string
 	currentValue: string
 	unrealisedPnl: string

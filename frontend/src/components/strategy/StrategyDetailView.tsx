@@ -19,6 +19,7 @@ import {
 	formatUsdcPrecise,
 	signTextClass,
 } from '@/lib/format'
+import { isPositive } from '@/components/strategy/amount'
 import { ActivityPanel } from '@/components/strategy/ActivityPanel'
 import { InvestPanel } from '@/components/strategy/InvestPanel'
 import { PerformancePanel } from '@/components/strategy/PerformancePanel'
@@ -70,7 +71,10 @@ export function StrategyDetailView({ slug }: { slug: string }) {
 
 	const strategy = detail.data
 	const { metrics, verification } = strategy
-	const position = strategy.position
+	// A fully redeemed position stays on the wire as a row with zero shares, so that its
+	// deposit and withdrawal history survives. There is nothing left to manage, and the
+	// page reads as an allocation opportunity again rather than a position worth $0.00.
+	const position = isPositive(strategy.position?.shares) ? strategy.position : null
 
 	return (
 		<div className="flex flex-col gap-4">

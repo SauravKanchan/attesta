@@ -16,6 +16,15 @@ import type { SessionHint } from '@/lib/session-hint'
 
 const COLLAPSE_STORAGE_KEY = 'attesta.sidebar.collapsed'
 
+/**
+ * Two characters that tell one account from another. A wallet-derived username starts
+ * `0x`, which every account shares, so the prefix is dropped before taking them.
+ */
+function initials(username: string | undefined): string {
+	const name = (username ?? '').trim().replace(/^@/, '').replace(/^0x/i, '')
+	return name === '' ? '?' : name.slice(0, 2).toUpperCase()
+}
+
 interface NavItem {
 	href: string
 	label: string
@@ -172,7 +181,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
 			<div className="border-t border-hairline p-2">
 				<div className={cn('flex items-center gap-2', collapsed && 'justify-center')}>
 					<span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-hairline-strong bg-surface-2 type-code-sm text-fg-secondary">
-						{(user?.username ?? '?').slice(0, 2).toUpperCase()}
+						{initials(user?.username)}
 					</span>
 					{collapsed ? null : (
 						<div className="min-w-0 flex-1">

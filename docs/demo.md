@@ -98,6 +98,20 @@ The tick loop starts with it: one tick per live strategy every 60 s, three at a 
 cd frontend && npm run dev       # http://localhost:3000
 ```
 
+### Check it is actually up
+
+```bash
+curl -s localhost:4000/api/health                      # {"status":"ok","database":"ok",...}
+curl -s localhost:4000/api/chain/config                # chain id, rpc url, usdc and registry addresses
+curl -s 'localhost:4000/api/strategies' | head -c 200  # three strategies
+```
+
+Two settings have to agree or the UI comes up blank with CORS errors in the console:
+`NEXT_PUBLIC_API_URL` in `frontend/.env` must point at the backend (`http://localhost:4000`)
+and `CORS_ORIGIN` in `backend/.env` must be the frontend's origin
+(`http://localhost:3000`). Check both before recording — they are easy to leave pointing
+somewhere else after a debugging session.
+
 ### Do not redeploy after seeding
 
 `StrategyVault` stores its USDC address as an `immutable`. Re-running
@@ -130,11 +144,26 @@ Two things have to happen before the story lands:
    fallback decision taken in-process is never dressed up as an attested run.
 
 So, before recording: sign in, hit the faucet, allocate into a strategy (§3 steps 1–6),
-then force a few ticks rather than waiting on the 60 s loop:
+then get some ticks in. Two ways.
+
+**Just wait.** The backend's loop ticks every live strategy every 60 s on its own. Three
+NAV points takes about four minutes and needs no intervention.
+
+**Or drive them by hand**, which is faster and gives you a terminal worth filming. Run the
+backend with its own loop switched off first, so that two processes are not settling the
+same vault from one operator nonce:
 
 ```bash
+# terminal 3, instead of plain `npm run dev`
+cd backend && SCHEDULER_ENABLED=false npm run dev
+
+# terminal 5
 cd backend && npm run tick -- churn --repeat 3 --gap 30
 ```
+
+The backend still has to be running even when you drive the ticks yourself: the strategy
+fetches its prices over HTTP *from inside the enclave*, and `GET /api/oracle/prices` is
+what answers. A tick against a stopped backend produces no decision at all.
 
 Real output from that command on this machine:
 
@@ -385,10 +414,17 @@ Do not blur this. Judges will ask, and the honest version is more convincing.
 > the deposits and withdrawals, and every number on the screen.
 >
 > Standing in for production: the strategy operator is an anvil EOA where it would be a
-> Circle Agent Wallet on Arc, the investor signs with a pasted test key where Privy's
-> embedded wallet would sign, the secret scheme is `local-dev` where it would be TDH2 to
-> the Vault DON, and the scheduler owns the tick interval where a deployed workflow's cron
-> trigger would. Every one of those is one seam, not a rewrite.
+> Circle Agent Wallet on Arc, the investor signs with a test key held in the browser where
+> Privy's embedded wallet would sign, the secret scheme is `local-dev` where it would be
+> TDH2 to the Vault DON, and the backend owns the tick interval where a deployed workflow's
+> cron trigger would.
+
+Say the strong version of that rather than the soft one. **Circle Agent Wallets are not
+implemented and Privy is not integrated** — the settlement layer is a vault on a local
+chain and the investor signer is a key in the browser. Each sits behind one seam
+(`ChainPort` for the operator, `frontend/src/lib/wallet.ts` for the signer) and neither is
+presented as the real thing anywhere in the UI. What *is* real is the layer the whole
+claim rests on: the strategy compiled, measured and run through CRE's enclave path.
 
 ---
 
@@ -404,13 +440,19 @@ Have this on hand for questions.
 | Scheduling | backend tick loop, 60 s, `SCHEDULER_ENABLED` | the DON's cron trigger |
 | Creator parameters | encrypted in the browser, `local-dev` AES-256-GCM, key never leaves the tab; the enclave therefore reads an empty secret and each strategy falls back to its documented default | TDH2 to the Vault DON threshold key; released only into an attested enclave |
 | Price data | seeded deterministic walk served by `GET /api/oracle/prices`, fetched *from inside* the simulated enclave over HTTP | a real venue or data feed over the enclave's confidential HTTP client |
-| Strategy wallet | anvil EOA per strategy, funded by the deployer, `operator` on the vault | Circle Agent Wallet on Arc with a spending policy, directed from inside the enclave |
-| Investor wallet | private key pasted into the browser, signs the challenge and every transaction | Privy embedded wallet behind social login — same signer interface, same challenge/verify exchange |
+| Strategy wallet | anvil EOA per strategy, funded by the deployer, `operator` on the vault | Circle Agent Wallet on Arc with a spending policy, directed from inside the enclave — **designed for, not built** |
+| Investor wallet | private key held in the browser, signs the challenge and every transaction | Privy embedded wallet behind social login — same signer interface, same challenge/verify exchange, **not integrated yet** |
 | Settlement | `StrategyVault` on anvil, MockUSDC, 6 dp | USDC on Arc |
 | Trades | `recordTrade` events priced off the oracle walk; the vault does not swap | real venue execution on Arc |
 | Signed reports | `donRuntime.report(...)` runs in the simulator | consensus-signed reports from the DON |
 
-Two claims that are **false for this system** and must not appear anywhere: Intel SGX,
+Of the three partner technologies in the architecture, only **Chainlink CRE** is wired
+into the running system. [prizes.md](prizes.md) is the authority on that and marks the
+Circle layer as out of scope. Do not let the pitch imply otherwise — the enclave layer is
+strong enough on its own, and a judge who catches an overclaim will discount the parts
+that are true.
+
+Claims that are **false for this system** and must not appear anywhere: Intel SGX,
 MRENCLAVE, zk-STARKs or any zero-knowledge proof, and enclave quorum counts. It is AWS
 Nitro Enclaves in us-west-2 and nothing else.
 
@@ -439,6 +481,17 @@ Contracts were redeployed under the seeded database. Re-seed (§1).
 `frontend/.env` must point `NEXT_PUBLIC_API_URL` at the backend you are actually running,
 and the backend's `CORS_ORIGIN` must match the frontend's origin. Contract addresses are
 never read from env — `GET /api/chain/config` is authoritative for those.
+
+**A tick takes longer than the 60 s interval.**
+Expected — a simulate can run 25–90 s. The loop skips a strategy whose previous tick is
+still running rather than stacking two settlements into one NAV series, and logs
+`previous tick still running; skipping this cycle`.
+
+**Two things are ticking the same strategy.**
+Do not run `npm run tick` against the same database while `npm run dev`'s scheduler is
+live on the same strategy — the vault's operator would sign two transactions from one
+nonce. Either let the loop run, or start the backend with `SCHEDULER_ENABLED=false` and
+drive the ticks by hand.
 
 **A page renders empty with `request failed validation` in the console.**
 A query parameter is out of the range the route accepts. The response body names the field

@@ -223,14 +223,18 @@ function SecretRowFields({ row, onPatch, onRemove, removable }: SecretRowFieldsP
 	return (
 		<div className="flex flex-col gap-2 px-4 py-3">
 			<div className="flex items-end gap-3">
-				<Input
-					mono
-					className="uppercase"
-					label="Key"
-					placeholder="TARGET_WEIGHT_BPS"
-					value={row.key}
-					onChange={(event) => onPatch({ key: event.target.value.toUpperCase() })}
-				/>
+				{/* Wide enough for the UPPER_SNAKE_CASE ids strategies actually declare;
+				    a key clipped mid-word is unreadable on a listing and on camera. */}
+				<div className="w-64 shrink-0">
+					<Input
+						mono
+						className="uppercase"
+						label="Key"
+						placeholder="TARGET_WEIGHT_BPS"
+						value={row.key}
+						onChange={(event) => onPatch({ key: event.target.value.toUpperCase() })}
+					/>
+				</div>
 				<div className="flex-1">
 					<Input
 						mono

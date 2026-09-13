@@ -30,7 +30,8 @@ import type { RiskFilter, SortKey } from '@/components/strategy/strategy-meta'
 
 /** Long enough that a fast typist makes one request, short enough to feel immediate. */
 const SEARCH_DEBOUNCE_MS = 180
-const CATALOGUE_LIMIT = 200
+/** The ceiling `GET /api/strategies` accepts; asking for more is rejected outright. */
+const CATALOGUE_LIMIT = 100
 const SKELETON_CARDS = 6
 
 export function MarketplaceBrowser() {

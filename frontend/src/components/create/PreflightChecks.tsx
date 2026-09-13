@@ -16,6 +16,10 @@ export interface PreflightChecksProps {
 export function PreflightChecks({ checks, streaming }: PreflightChecksProps) {
 	const passed = checks.filter((check) => check.status === 'passed').length
 	const failed = checks.some((check) => check.status === 'failed')
+	// The two slow checks are the last two rows, which on a laptop sit below the fold.
+	// Naming the running one in the header is what keeps a minute of `cre workflow build`
+	// from reading as a stalled screen.
+	const running = checks.find((check) => check.status === 'running') ?? null
 
 	return (
 		<div className="flex flex-col rounded-sm border border-hairline bg-surface-1">
@@ -27,9 +31,21 @@ export function PreflightChecks({ checks, streaming }: PreflightChecksProps) {
 						pipeline never reached it.
 					</p>
 				</div>
-				<Tag mono tone={failed ? 'risk' : passed === checks.length && checks.length > 0 ? 'verified' : 'neutral'}>
-					{passed} / {checks.length} passed
-				</Tag>
+				<div className="flex shrink-0 flex-col items-end gap-1">
+					<Tag
+						mono
+						className="whitespace-nowrap"
+						tone={failed ? 'risk' : passed === checks.length && checks.length > 0 ? 'verified' : 'neutral'}
+					>
+						{passed} / {checks.length} passed
+					</Tag>
+					{running === null ? null : (
+						<span className="flex items-center gap-1.5 type-body-sm text-fg-muted">
+							<span className="size-1.5 rounded-xs bg-telemetry-hover pulse-dot" aria-hidden="true" />
+							{running.label}
+						</span>
+					)}
+				</div>
 			</div>
 			<ul className="flex flex-col divide-y divide-hairline">
 				{checks.map((check) => (
@@ -52,7 +68,7 @@ function CheckRow({ check, streaming }: { check: SanityCheck; streaming: boolean
 	}, [failed])
 
 	return (
-		<li className="flex flex-col">
+		<li className="flex flex-col" data-check={check.id} data-status={check.status}>
 			<div className="flex items-start gap-3 px-4 py-2.5">
 				<StatusGlyph status={check.status} streaming={streaming} />
 				<div className="min-w-0 flex-1">

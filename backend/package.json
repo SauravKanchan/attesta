@@ -15,6 +15,8 @@
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "node --env-file-if-exists=.env --import tsx src/db/migrate.ts",
 		"db:seed": "node --env-file-if-exists=.env --import tsx src/db/seed.ts",
+		"seed:reset": "node --env-file-if-exists=.env --import tsx src/seed/reset.ts",
+		"seed": "PORT=${PORT:-4100} DATABASE_URL=${DATABASE_URL:-./data/attesta.db} npm run seed:reset && PORT=${PORT:-4100} DATABASE_URL=${DATABASE_URL:-./data/attesta.db} node --env-file-if-exists=.env --import tsx src/seed/index.ts",
 		"chain:abis": "node --env-file-if-exists=.env --import tsx src/chain/generate-abis.ts",
 		"verify:chain": "node --env-file-if-exists=.env --import tsx src/chain/verify.ts",
 		"verify:oracle": "node --env-file-if-exists=.env --import tsx src/oracle/verify.ts",

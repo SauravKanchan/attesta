@@ -82,6 +82,53 @@ export function Chart({
 	const rising = first !== undefined && last !== undefined ? last.value >= first.value : true
 	const stroke = rising ? 'var(--color-verified)' : 'var(--color-risk)'
 
+	/**
+	 * recharts derives an automatic domain from the plotted series alone, so a reference
+	 * line outside it is clipped away silently — the cost basis of a position that has
+	 * only ever been under water would be promised by the legend and never drawn. When
+	 * there is a reference value, the domain is widened to hold it.
+	 */
+	const yDomain = useMemo<[number, number] | ['auto', 'auto']>(() => {
+		if (referenceValue === null || !Number.isFinite(referenceValue) || data.length === 0) {
+			return ['auto', 'auto']
+		}
+		let min = referenceValue
+		let max = referenceValue
+		for (const datum of data) {
+			if (datum.value < min) min = datum.value
+			if (datum.value > max) max = datum.value
+		}
+		return niceBounds(min, max)
+	}, [data, referenceValue])
+
+	/**
+	 * The axis labels the data, not the range control: a 30D window holding an hour of
+	 * ticks would otherwise stamp every point "Sep 13" and pile the labels on top of one
+	 * another. Under a day and a half the reader needs the time of day; past that, the date.
+	 */
+	const xFormat: 'time' | 'date' | 'month' = useMemo(() => {
+		if (data.length < 2) return 'time'
+		const span = (data[data.length - 1] as Datum).ts - (data[0] as Datum).ts
+		if (span < 36 * 60 * 60 * 1000) return 'time'
+		if (span < 365 * 24 * 60 * 60 * 1000) return 'date'
+		return 'month'
+	}, [data])
+
+	/**
+	 * Evenly spaced ticks rather than one per sample. recharts thins its own ticks only
+	 * once their boxes collide, which leaves a dense series with an unreadable axis.
+	 */
+	const xTicks = useMemo<number[] | undefined>(() => {
+		if (data.length === 0) return undefined
+		if (data.length <= AXIS_TICK_COUNT) return data.map((datum) => datum.ts)
+		const first = (data[0] as Datum).ts
+		const last = (data[data.length - 1] as Datum).ts
+		if (last === first) return [first]
+		return Array.from({ length: AXIS_TICK_COUNT }, (_, index) =>
+			Math.round(first + ((last - first) * index) / (AXIS_TICK_COUNT - 1)),
+		)
+	}, [data])
+
 	const markers = useMemo(() => {
 		if (data.length === 0) return []
 		return events
@@ -134,7 +181,8 @@ export function Chart({
 								type="number"
 								scale="time"
 								domain={['dataMin', 'dataMax']}
-								tickFormatter={(value: number) => formatAxisTime(value, activeRange)}
+								ticks={xTicks}
+								tickFormatter={(value: number) => formatAxisTime(value, xFormat)}
 								tick={AXIS_TICK}
 								tickLine={false}
 								axisLine={{ stroke: 'var(--color-hairline)' }}
@@ -142,7 +190,7 @@ export function Chart({
 							/>
 							<YAxis
 								width={64}
-								domain={['auto', 'auto']}
+								domain={yDomain}
 								tickFormatter={valueFormatter}
 								tick={AXIS_TICK}
 								tickLine={false}
@@ -204,24 +252,47 @@ export function Chart({
 	)
 }
 
+/**
+ * Bounds rounded out to a round step. Handing recharts an explicit domain switches off its
+ * own tick-rounding, so without this the axis reads 2,506.90 / 2,466.88 / 2,436.88 instead
+ * of round figures a reader can compare at a glance.
+ */
+function niceBounds(min: number, max: number): [number, number] {
+	if (!(max > min)) {
+		const pad = Math.max(Math.abs(max) * 0.01, 1)
+		return [min - pad, max + pad]
+	}
+	const rawStep = (max - min) / 4
+	const magnitude = 10 ** Math.floor(Math.log10(rawStep))
+	const normalised = rawStep / magnitude
+	const step = (normalised <= 1 ? 1 : normalised <= 2 ? 2 : normalised <= 5 ? 5 : 10) * magnitude
+	return [Math.floor(min / step) * step, Math.ceil(max / step) * step]
+}
+
 const AXIS_TICK = {
 	fill: 'var(--color-fg-muted)',
 	fontSize: 10,
 	fontFamily: 'var(--font-mono)',
 } as const
 
-function formatAxisTime(value: number, range: TimeRange): string {
+/** How many labels the time axis carries at most. */
+const AXIS_TICK_COUNT = 5
+
+const AXIS_FORMATTERS: Record<'time' | 'date' | 'month', Intl.DateTimeFormat> = {
+	time: new Intl.DateTimeFormat('en-US', {
+		hour: '2-digit',
+		minute: '2-digit',
+		hour12: false,
+		timeZone: 'UTC',
+	}),
+	date: new Intl.DateTimeFormat('en-US', { day: '2-digit', month: 'short', timeZone: 'UTC' }),
+	month: new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }),
+}
+
+function formatAxisTime(value: number, format: 'time' | 'date' | 'month'): string {
 	const date = new Date(value)
 	if (Number.isNaN(date.getTime())) return ''
-	if (range === '24h') {
-		return new Intl.DateTimeFormat('en-US', {
-			hour: '2-digit',
-			minute: '2-digit',
-			hour12: false,
-			timeZone: 'UTC',
-		}).format(date)
-	}
-	return new Intl.DateTimeFormat('en-US', { day: '2-digit', month: 'short', timeZone: 'UTC' }).format(date)
+	return AXIS_FORMATTERS[format].format(date)
 }
 
 type ChartTooltipProps = TooltipContentProps & {

@@ -67,6 +67,8 @@ interface ProofDrawerProps {
 }
 
 function ProofDrawer({ open, onClose, verification }: ProofDrawerProps) {
+	const attested = verification.binaryHash !== null && verification.lastAttestedAt !== null
+
 	useEffect(() => {
 		if (!open) return
 		function onKeyDown(event: KeyboardEvent) {
@@ -96,7 +98,12 @@ function ProofDrawer({ open, onClose, verification }: ProofDrawerProps) {
 			>
 				<header className="flex items-start justify-between gap-4 border-b border-hairline px-4 py-3">
 					<div className="flex items-start gap-2">
-						<ShieldCheckIcon className="mt-0.5 size-4 shrink-0 text-verified" />
+						<ShieldCheckIcon
+							className={cn(
+								'mt-0.5 size-4 shrink-0',
+								attested ? 'text-verified' : 'text-warning-light',
+							)}
+						/>
 						<div>
 							<h2 className="type-headline-sm text-fg">Attestation proof</h2>
 							<p className="mt-0.5 type-body-sm text-fg-secondary">
