@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="1200" height="320" role="img" aria-label="attesta — trading strategies whose track record is attested, not claimed">
+  <title>attesta</title>
+
+  <!-- Ground: design-system canvas -->
+  <rect width="1200" height="320" rx="12" fill="#090A0D"/>
+
+  <!-- Seal tile: surface tier 1 on a hairline border -->
+  <rect x="72" y="96" width="112" height="112" rx="8" fill="#0E1117" stroke="#27272A" stroke-width="1"/>
+  <path d="M 104 152 L 122 172 L 156 130"
+        fill="none" stroke="#10B981" stroke-width="11"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Wordmark -->
+  <text x="232" y="168"
+        font-family="'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="82" font-weight="700" letter-spacing="-2" fill="#F8FAFC">attesta</text>
+
+  <!-- Verified rule -->
+  <rect x="234" y="196" width="120" height="4" rx="2" fill="#10B981"/>
+
+  <!-- Tagline -->
+  <text x="232" y="252"
+        font-family="'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="27" font-weight="400" fill="#94A3B8">Trading strategies whose track record is attested, not claimed.</text>
+</svg>
