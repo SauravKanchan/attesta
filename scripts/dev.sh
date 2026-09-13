@@ -44,6 +44,15 @@ done
 cast block-number --rpc-url "$RPC_URL" >/dev/null 2>&1 || { echo "anvil failed, see $LOGS/anvil.log" >&2; exit 1; }
 echo "  anvil up on $RPC_URL"
 
+# contracts/lib holds Foundry dependencies and is gitignored, so a fresh clone has none.
+if [ ! -d "$ROOT/contracts/lib/forge-std" ]; then
+	echo "[0/4] installing Foundry dependencies"
+	(cd "$ROOT/contracts" && forge install >"$LOGS/forge-install.log" 2>&1) || {
+		echo "  forge install failed — see $LOGS/forge-install.log" >&2
+		exit 1
+	}
+fi
+
 echo "[2/4] deploying contracts"
 if ! (cd "$ROOT/contracts" && ./deploy-local.sh >"$LOGS/deploy.log" 2>&1); then
 	echo "  deploy failed — see $LOGS/deploy.log" >&2
