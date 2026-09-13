@@ -199,27 +199,32 @@ about three minutes.
 means a flat NAV and no trades. `churn` (the overtrader) flips its whole book every tick,
 so it produces trades, pays the 30 bps venue cost on turnover, and moves NAV.
 
-### The APY number will look wrong, and you should say why
+### APY reads as unavailable, and that is the point
 
-APY is annualised from the observed NAV span. After three ticks the span is about four
-minutes, and a −1.6% move over four minutes annualises to −100%. The card renders exactly
-that:
+The card leads with **return since inception**, and the APY tile shows a dash with the hint
+*"Not enough NAV history to annualise yet"*. That is deliberate, not a gap.
 
-![Marketplace after three churn ticks](screenshots/02-marketplace-after-ticks.png)
+Annualising a twenty-minute observation is not a projection, it is an artefact: compound a
+small loss over a year and every strategy saturates to exactly −100%, compound a small gain
+and you get numbers like 9.9e106. So the metrics refuse to annualise below a six-hour
+window and report `null` instead, and the card falls back to the figure that is honest at
+any span.
 
-Sharpe is the same story: the detail page shows −1737.43 under *Max drawdown*, which is
-what annualising the volatility of three points gives.
+Return since inception separates the strategies cleanly — one down 1.4%, another down
+13.4% — which the saturated annualisation did not.
 
-Nothing is broken — that is what compounding a four-minute loss over a year gives, and it
-is the price of *deriving* the number instead of storing it. Three honest options:
+**Say this out loud, it is one of the better lines in the demo:**
 
-- **Lead with total return and the NAV chart**, not APY. In the screenshot above, total
-  return and max drawdown both read −1.58% — NAV per share went 0.996307 → 0.986526 →
-  0.980607 across three ticks — and both of those are real.
-- **Name it in one line**: "that's a four-minute-old track record annualised — the point is
-  the number is computed from the vault's NAV series, not typed into a database."
-- Sort the marketplace by **Total return** instead of APY so the card that leads is not
-  the one with the largest annualisation artifact.
+> "It won't show you an APY yet. This track record is twenty minutes old, and annualising
+> twenty minutes gives you a number that means nothing. It shows return since inception
+> instead, because that one is true. A marketplace that prints a confident APY over a
+> twenty-minute history is telling you something it cannot know."
+
+That reframes the strongest objection to the whole category — *anyone can claim 40% APY* —
+as something the product actively refuses to do. Do not apologise for the dash.
+
+If you want a real APY on camera, the strategies need six hours of ticks behind them. That
+is the only way to get one honestly.
 
 ---
 
@@ -398,9 +403,10 @@ evidence, not the pitch.
 - The badge says **Nitro enclave verified** only when the last decision came from the
   enclave path. The strategy nobody has ticked still says **Awaiting attestation** — the
   badge tracks runs, not intentions.
-- Be first to say it about the APY: this track record is minutes old, so annualising it
-  produces a silly number. Total return — −1.58% over three ticks here — is the real
-  figure. The point is where the number comes from, not how big it is.
+- Be first to say it about the APY: the card shows return since inception and the APY tile
+  reads unavailable, because the product refuses to annualise a track record this young.
+  That is the answer to "anyone can claim 40% APY" — this one declines to. The point is
+  where the number comes from, not how big it is.
 - The investor side is a browser-signed deposit: approve, deposit, and the backend records
   the position only after verifying the receipt on chain. It never holds a key and it
   never takes the client's word for a transfer.
