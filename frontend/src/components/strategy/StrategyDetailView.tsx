@@ -113,13 +113,6 @@ export function StrategyDetailView({ slug }: { slug: string }) {
 
 			<section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
 				<StatTile
-					label="Attested return (APY)"
-					scale="display"
-					value={metrics.apy === null ? EM_DASH : formatPercent(metrics.apy)}
-					valueClassName={metrics.apy === null ? 'text-fg-muted' : signTextClass(metrics.apy)}
-					hint={metrics.apy === null ? 'Not enough NAV history to annualise yet' : undefined}
-				/>
-				<StatTile
 					label="Total return"
 					scale="display"
 					value={metrics.totalReturn === null ? EM_DASH : formatPercent(metrics.totalReturn)}
@@ -138,6 +131,13 @@ export function StrategyDetailView({ slug }: { slug: string }) {
 					scale="display"
 					value={formatUsd(metrics.aum)}
 					hint={`${metrics.investorCount} ${metrics.investorCount === 1 ? 'investor' : 'investors'} · NAV ${formatUsdcPrecise(metrics.navPerShare)}`}
+				/>
+				<StatTile
+					label="Attested return (APY)"
+					scale="display"
+					value={metrics.apy === null ? EM_DASH : formatPercent(metrics.apy)}
+					valueClassName={metrics.apy === null ? 'text-fg-muted' : signTextClass(metrics.apy)}
+					hint={metrics.apy === null ? 'Not enough NAV history to annualise yet' : undefined}
 				/>
 			</section>
 

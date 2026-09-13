@@ -119,7 +119,8 @@ function IdentityPanel({ draft }: { draft: SubmissionDraft | null }) {
 			</dl>
 			{measured ? null : (
 				<p className="border-t border-hairline px-4 py-2.5 type-body-sm text-fg-muted">
-					Both hashes appear once <span className="type-code-sm">cre workflow build</span> succeeds.
+					<span className="type-code-sm">cre workflow build</span> is what produces them; both land
+					here when the run finishes.
 				</p>
 			)}
 		</div>

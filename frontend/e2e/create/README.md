@@ -42,18 +42,21 @@ a CRE workflow there and runs a real `cre workflow build` against it.
 ## What the timings are for
 
 `logs/e2e-create/timings.json` records when every check started and settled, because dead
-air is the create flow's real risk on camera. On this machine, against a warm workspace:
+air is the create flow's real risk on camera. Measured on this machine over five runs:
 
-| Phase | Seconds |
-|---|---|
-| `parses` … `no-side-effects` (one analysis pass) | 0.3 |
-| `typechecks` | ~1 |
-| `describe-valid`, `deterministic` | <0.1 |
-| `cre-build` | 11–17 |
-| `cre-simulate` | 18–44 |
-| publish (deploy vault, fund reserve, register) | ~20 |
+| Phase | Warm workspace | First run in a fresh `STRATEGY_WORKSPACE_DIR` |
+|---|---|---|
+| `parses` … `no-side-effects` (one analysis pass, streamed together) | 0.3s | 0.3s |
+| `typechecks` | 0–4s | 4s |
+| `describe-valid`, `deterministic` | <0.1s | <0.1s |
+| `cre-build` | 4–17s | 55s |
+| `cre-simulate` | 14–44s | 15s |
+| **nine checks, end to end** | **22–56s** | **74s** |
+| publish — deploy the vault, fund the reserve, register on-chain | ~20s | ~20s |
 
-So a run is 40–60s, almost all of it in the two `cre` steps, and publish adds twenty more.
+So the whole run is under a minute warm, and all but a second of it is the two `cre`
+steps — which are the last two rows of the list and sit below the fold on a 900px-tall
+window. The header names the check that is running for that reason.
 
 ## Conventions
 

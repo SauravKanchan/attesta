@@ -8,13 +8,14 @@ import { Tabs } from '@/components/ui/Tabs'
 import { Tag } from '@/components/ui/Tag'
 import { useToast } from '@/components/ui/Toast'
 import { AlertIcon } from '@/components/ui/icons'
-import { formatUsdc } from '@/lib/format'
+import { EM_DASH, formatUsdc } from '@/lib/format'
 import { InvestmentsTable } from '@/components/portfolio/InvestmentsTable'
 import { MyStrategiesTable } from '@/components/portfolio/MyStrategiesTable'
 import { PortfolioSummaryTiles } from '@/components/portfolio/PortfolioSummaryTiles'
 import { PortfolioValueChart } from '@/components/portfolio/PortfolioValueChart'
 import { WithdrawModal } from '@/components/portfolio/WithdrawModal'
 import { unitsOrZero } from '@/components/portfolio/units'
+import { RequestError } from '@/components/strategy/RequestError'
 import { ApiError, getPortfolio, listStrategies, requestFaucet } from '@/lib/api'
 import type { Portfolio, Position, StrategySummary } from '@/lib/types'
 
@@ -25,15 +26,30 @@ type TabValue = 'investments' | 'created'
  * both live on the strategy, so the listing is fetched alongside it and joined here by
  * id — there is no per-creator endpoint, and inventing one metric locally to avoid a
  * second request would put an unattested number on the page.
+ *
+ * The endpoint refuses a page larger than this, so a listing that reports a bigger
+ * `total` than it returned is a partial answer and the tables say so.
  */
 const STRATEGY_PAGE_SIZE = 100
+
+/**
+ * What the last listing request produced. The two tabs are joins against it, so an
+ * answer that never arrived and an answer that arrived complete are different facts:
+ * "you have published nothing" is only true of the second.
+ */
+type Listing =
+	| { status: 'ok'; strategies: StrategySummary[]; missing: number }
+	| { status: 'failed'; error: ApiError }
+
+/** Stable identity, so the joins below are not rebuilt on every render. */
+const NO_STRATEGIES: StrategySummary[] = []
 
 export default function PortfolioPage() {
 	const { user } = useAuth()
 	const { toast } = useToast()
 
 	const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
-	const [strategies, setStrategies] = useState<StrategySummary[]>([])
+	const [listing, setListing] = useState<Listing | null>(null)
 	const [loading, setLoading] = useState(true)
 	const [error, setError] = useState<string | null>(null)
 	const [tab, setTab] = useState<TabValue>('investments')
@@ -62,9 +78,11 @@ export default function PortfolioPage() {
 		}
 
 		if (listingResult.status === 'fulfilled') {
-			setStrategies(listingResult.value.strategies)
+			const { strategies, total } = listingResult.value
+			setListing({ status: 'ok', strategies, missing: Math.max(total - strategies.length, 0) })
 		} else {
 			console.error('attesta: loading the strategy listing failed', listingResult.reason)
+			setListing({ status: 'failed', error: asApiError(listingResult.reason) })
 		}
 
 		setLoading(false)
@@ -73,6 +91,8 @@ export default function PortfolioPage() {
 	useEffect(() => {
 		void load()
 	}, [load])
+
+	const strategies = listing?.status === 'ok' ? listing.strategies : NO_STRATEGIES
 
 	const strategiesById = useMemo(() => {
 		const index = new Map<string, StrategySummary>()
@@ -84,6 +104,15 @@ export default function PortfolioPage() {
 		if (!user) return []
 		return strategies.filter((strategy) => strategy.creator.id === user.id)
 	}, [strategies, user])
+
+	// Said once, under whichever table is open. A row that reads — for APY, or a strategy
+	// missing from the creator tab, is then explained rather than left to look like a fact
+	// about the strategy.
+	const listingNote = useMemo(() => {
+		if (listing === null || listing.status === 'failed' || listing.missing === 0) return null
+		const shown = listing.strategies.length
+		return `Showing the ${shown} most recent strategies of ${shown + listing.missing}. Anything older is missing from these tables, and its APY reads ${EM_DASH}.`
+	}, [listing])
 
 	// A fully redeemed position stays on the wire as a zero-share row so its history
 	// survives; there is nothing left to withdraw from, so it leaves the table.
@@ -160,7 +189,9 @@ export default function PortfolioPage() {
 							{
 								value: 'created',
 								label: 'My strategies',
-								badge: <Tag mono>{created.length}</Tag>,
+								// A listing that never arrived leaves the count unknown, and a zero
+								// there would read as "you have published nothing".
+								badge: <Tag mono>{listing?.status === 'failed' ? EM_DASH : created.length}</Tag>,
 							},
 						]}
 					/>
@@ -172,9 +203,24 @@ export default function PortfolioPage() {
 							loading={loading}
 							onWithdraw={setWithdrawing}
 						/>
+					) : listing?.status === 'failed' ? (
+						<RequestError
+							error={listing.error}
+							what="the strategies you publish"
+							onRetry={() => void load()}
+						/>
 					) : (
 						<MyStrategiesTable strategies={created} loading={loading} />
 					)}
+
+					{listing?.status === 'failed' && tab === 'investments' ? (
+						<p className="type-body-sm text-fg-muted">
+							APY reads {EM_DASH} because the strategy listing is unavailable:{' '}
+							{listing.error.message}
+						</p>
+					) : null}
+
+					{listingNote === null ? null : <p className="type-body-sm text-fg-muted">{listingNote}</p>}
 				</div>
 			</div>
 
@@ -185,4 +231,15 @@ export default function PortfolioPage() {
 			/>
 		</>
 	)
+}
+
+/**
+ * `lib/api` rejects with an `ApiError` for transport failures as well as HTTP ones, so
+ * this is a narrowing rather than a conversion. Anything else still reaches the reader
+ * with its message instead of collapsing into a blank panel.
+ */
+function asApiError(reason: unknown): ApiError {
+	if (reason instanceof ApiError) return reason
+	const message = reason instanceof Error ? reason.message : 'The strategy listing could not be loaded'
+	return new ApiError(0, 'unknown_error', message, reason)
 }

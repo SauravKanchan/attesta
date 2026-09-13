@@ -64,11 +64,13 @@ export function StrategyCard({ entry, className }: StrategyCardProps) {
 			<div className="flex items-end justify-between gap-3 rounded-sm border border-hairline bg-surface-2 px-3 py-2.5">
 				<div className="min-w-0">
 					<p className="type-label-caps text-fg-muted">Attested return</p>
-					<p className="mt-1 flex items-baseline gap-1.5">
+					<p className="mt-1 flex flex-wrap items-baseline gap-x-1.5">
 						<span className={cn('type-metric-display', headline === null ? 'text-fg-muted' : signTextClass(headline))}>
 							{headline === null ? EM_DASH : formatPercent(headline)}
 						</span>
-						<span className="type-label-caps text-fg-muted">{headlineLabel}</span>
+						{/* The label is one unit: a narrow card drops it to its own line rather than
+						    breaking "SINCE INCEPTION" across two. */}
+						<span className="whitespace-nowrap type-label-caps text-fg-muted">{headlineLabel}</span>
 					</p>
 				</div>
 				{strategy.sparkline.length > 1 ? (

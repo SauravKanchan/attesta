@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
 import { formatUsd, formatUsdcPrecise } from '@/lib/format'
-import { ApiError, getStrategy, recordWithdrawal } from '@/lib/api'
+import { ApiError, getStrategy } from '@/lib/api'
+import { UnrecordedTransferError, recordSettledTransfer } from '@/lib/settlement'
 import { WalletError, withdrawFromStrategy } from '@/lib/wallet'
 import { amountForShares, formatUnits6, parseUnits6, percentOf, sharesForAmount, unitsOrZero } from '@/components/portfolio/units'
 import type { Position } from '@/lib/types'
@@ -17,7 +18,8 @@ const QUICK_PERCENTS = [25, 50, 75, 100] as const
 export interface WithdrawModalProps {
 	position: Position | null
 	onClose: () => void
-	onWithdrawn: (position: Position) => void
+	/** Null when the backend reported the redemption as already recorded, so it sent no position back. */
+	onWithdrawn: (position: Position | null) => void
 }
 
 /**
@@ -79,7 +81,7 @@ export function WithdrawModal({ position, onClose, onWithdrawn }: WithdrawModalP
 				)
 			}
 			const txHash = await withdrawFromStrategy(strategy.vaultAddress, formatUnits6(requested.shares))
-			const updated = await recordWithdrawal(position.strategySlug, txHash)
+			const updated = await recordSettledTransfer('withdraw', position.strategySlug, txHash)
 			toast({
 				tone: 'success',
 				title: 'Withdrawal settled',
@@ -87,6 +89,16 @@ export function WithdrawModal({ position, onClose, onWithdrawn }: WithdrawModalP
 			})
 			onWithdrawn(updated)
 		} catch (caught) {
+			// The vault pays out when the redemption is mined. A backend that cannot be
+			// reached after that only leaves the position unwritten, so the investor is told
+			// what actually happened rather than that the withdrawal failed.
+			if (caught instanceof UnrecordedTransferError) {
+				console.error('attesta: the withdrawal settled on chain but was not recorded', caught)
+				const message = `The vault paid out in ${caught.transfer.txHash}, but attesta could not reach the backend to record it. It will be recorded as soon as it can.`
+				setError(message)
+				toast({ tone: 'error', title: 'Redeemed, not yet recorded', description: message })
+				return
+			}
 			console.error('attesta: the withdrawal failed', caught)
 			const message =
 				caught instanceof WalletError || caught instanceof ApiError

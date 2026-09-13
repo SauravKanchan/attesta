@@ -58,7 +58,7 @@ export const SORT_LABEL: Record<SortKey, string> = {
 	investors: 'Investors',
 }
 
-export const DEFAULT_SORT: SortKey = 'apy'
+export const DEFAULT_SORT: SortKey = 'totalReturn'
 
 /** Tickers render with a leading `$`, and search matches what the reader can see. */
 export function displayTicker(ticker: string): string {

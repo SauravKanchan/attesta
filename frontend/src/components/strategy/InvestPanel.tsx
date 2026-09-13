@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/cn'
-import { ApiError, recordInvestment, recordWithdrawal } from '@/lib/api'
+import { ApiError } from '@/lib/api'
+import { UnrecordedTransferError, flushUnrecorded, recordSettledTransfer } from '@/lib/settlement'
 import { WalletError, investInStrategy, withdrawFromStrategy } from '@/lib/wallet'
 import { Button } from '@/components/ui/Button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
@@ -52,6 +53,23 @@ export interface InvestPanelProps {
 export function InvestPanel({ strategy, position, availableUsdc, onSettled, className }: InvestPanelProps) {
 	const [mode, setMode] = useState<Mode>('deposit')
 	const activeMode: Mode = position === null ? 'deposit' : mode
+
+	// A transfer that settled on chain but never reached the backend is replayed the moment
+	// this panel is on screen, so an investor who reloads after a failed record sees their
+	// position rather than having to move money again to shake it loose.
+	useEffect(() => {
+		let live = true
+		flushUnrecorded()
+			.then((settled) => {
+				if (live && settled > 0) onSettled()
+			})
+			.catch((error: unknown) => {
+				console.error('attesta: replaying unrecorded transfers failed', error)
+			})
+		return () => {
+			live = false
+		}
+	}, [onSettled])
 
 	return (
 		<section className={cn('rounded-sm border border-hairline bg-surface-1', className)}>
@@ -110,15 +128,32 @@ function DepositForm({ strategy, availableUsdc, onSettled, holding }: DepositFor
 		setSubmitting(true)
 		try {
 			const txHash = await investInStrategy(vault, amount)
-			const next = await recordInvestment(strategy.slug, txHash)
+			const next = await recordSettledTransfer('deposit', strategy.slug, txHash)
 			toast({
 				tone: 'success',
 				title: holding ? 'Added to your position' : 'Allocation confirmed',
-				description: `${formatUsd(amount)} into ${strategy.name}. You now hold ${trimAmount(next.shares) ?? next.shares} shares.`,
+				description:
+					next === null
+						? `${formatUsd(amount)} into ${strategy.name}.`
+						: `${formatUsd(amount)} into ${strategy.name}. You now hold ${trimAmount(next.shares) ?? next.shares} shares.`,
 			})
 			setAmount('')
 			onSettled()
 		} catch (cause: unknown) {
+			// The vault has the USDC once the deposit is mined, so a backend that cannot be
+			// reached after that point is a bookkeeping failure, not a failed deposit, and
+			// saying otherwise would send the investor to deposit a second time.
+			if (cause instanceof UnrecordedTransferError) {
+				console.error('attesta: the allocation settled on chain but was not recorded', cause)
+				toast({
+					tone: 'error',
+					title: 'Allocated, not yet recorded',
+					description: `The vault took ${formatUsd(amount)} in ${cause.transfer.txHash}. attesta could not reach the backend to write it down and will record it as soon as it can.`,
+				})
+				setAmount('')
+				onSettled()
+				return
+			}
 			console.error('attesta: the allocation failed', cause)
 			toast({
 				tone: 'error',
@@ -208,15 +243,29 @@ function WithdrawForm({ strategy, position, onSettled }: WithdrawFormProps) {
 		setSubmitting(true)
 		try {
 			const txHash = await withdrawFromStrategy(vault, shares)
-			const next = await recordWithdrawal(strategy.slug, txHash)
+			const next = await recordSettledTransfer('withdraw', strategy.slug, txHash)
 			toast({
 				tone: 'success',
 				title: 'Withdrawal confirmed',
-				description: `Redeemed ${shares} shares. ${trimAmount(next.shares) ?? next.shares} shares remain in ${strategy.name}.`,
+				description:
+					next === null
+						? `Redeemed ${shares} shares from ${strategy.name}.`
+						: `Redeemed ${shares} shares. ${trimAmount(next.shares) ?? next.shares} shares remain in ${strategy.name}.`,
 			})
 			setShares('')
 			onSettled()
 		} catch (cause: unknown) {
+			if (cause instanceof UnrecordedTransferError) {
+				console.error('attesta: the withdrawal settled on chain but was not recorded', cause)
+				toast({
+					tone: 'error',
+					title: 'Redeemed, not yet recorded',
+					description: `The vault paid out ${shares} shares in ${cause.transfer.txHash}. attesta could not reach the backend to write it down and will record it as soon as it can.`,
+				})
+				setShares('')
+				onSettled()
+				return
+			}
 			console.error('attesta: the withdrawal failed', cause)
 			toast({
 				tone: 'error',
