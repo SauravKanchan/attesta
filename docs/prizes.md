@@ -158,11 +158,16 @@ what the app secret is for.
 
 ## Why two wallet systems
 
-Investors get Privy wallets; strategies get Circle Agent Wallets. This is deliberate, not
-redundant. Investors are humans who need consumer onboarding — social login, recovery, no
-key management. Strategies are autonomous agents that need programmatic, policy-capped
-wallets with no human in the loop. Different actors, different trust models, different
-wallet infrastructure.
+Investors get Privy wallets; a strategy settles its own vault through an operator account.
+Today that operator is an ordinary key the platform holds — the Agent Wallet described
+above is where it would go, and is not built.
+
+The split itself is deliberate rather than redundant. Investors are humans who need
+consumer onboarding: social login, recovery, no key management. A strategy is an
+autonomous agent that needs a programmatic account with no human in the loop. Different
+actors, different trust models, different wallet infrastructure — which is why replacing
+the operator with a policy-capped Agent Wallet is the natural next step rather than a
+retrofit.
 
 ## Possible addition: The Graph
 
