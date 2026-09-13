@@ -9,10 +9,12 @@ hand-written React.
 | `01-landing.png` | Public landing page | Final |
 | `02-marketplace.png` | Marketplace browse | Final, after corrections |
 | `00-signin.png` | Sign in | Superseded — being replaced by Privy, do not invest in it |
+| `03-create-strategy-step1.png` | Create strategy, step 1 (Code) | Final |
 
-Screens still to design: strategy detail (both the un-invested and invested variants),
-portfolio, and create strategy. Their content requirements are written out in
-[../ui-prompt.md](../ui-prompt.md); build from that spec plus the design system below.
+Screens with no reference image — strategy detail (un-invested and invested), portfolio,
+and create-strategy steps 2 and 3 — are specified in words in
+[../ui-prompt.md](../ui-prompt.md). Build those from the spec plus the design system
+below; the reference images show how that spec is meant to look once rendered.
 
 ## Design system — "Cryptographic Quantitative Terminal"
 
