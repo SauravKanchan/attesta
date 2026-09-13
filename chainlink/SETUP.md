@@ -63,9 +63,9 @@ back to a default private key. Either pass `-e .env` or export the variables fir
 
 | Variable | Purpose |
 |---|---|
-| `CRE_ETH_PRIVATE_KEY` | Currently a throwaway dev key with no funds, for local simulation only. **Replace before any deployment.** |
+| `CRE_ETH_PRIVATE_KEY` | Throwaway key generated for this project. Holds a few cents of mainnet ETH for the one-off owner link and secret-allowlist transactions; never keep real funds on it. |
 | `CRE_TARGET` | Default target when `--target` is omitted |
-| `SECRET_API_TOKEN` | Value behind the `API_TOKEN` secret in `secrets.yaml`; the enclave fetches it via `runtime.getSecret({ id })` |
+| `SECRET_API_TOKEN` | Value behind the `API_TOKEN` secret in `secrets.yaml`; the enclave fetches it via `runtime.getSecret({ id, namespace })` with `namespace` taken from `secretNamespace` in the config |
 
 ## Layout
 
@@ -124,12 +124,41 @@ deployment. In real execution these logs never leave the TEE.
 - [x] CLI installed, authenticated (`cre whoami`)
 - [x] Project scaffolded from `hello-confidential-workflows-ts`
 - [x] Simulation passing end to end
-- [ ] **Deploy access** — `Deploy Access: Not enabled`. Request with `cre account access`.
-- [ ] **Confidential Workflows private beta** — enrollment via a Chainlink account team is
-      required to deploy. Simulation does not need it.
+- [x] Deploy access enabled; owner `0xE0D1…83D3` linked on Ethereum mainnet (one-off, ~$0.01)
+- [x] Secret `API_TOKEN` created in namespace `main`; the workflow reads it via `secretNamespace`
+- [x] Deployed as `hello-confidential-staging` to the `private` registry, DON family `zone-a`
+- [ ] **Live confidential execution** — every run fails on Chainlink's side (see below). Not a
+      blocker: the ETHOnline Chainlink prize accepts a CRE CLI simulation as evidence.
+- [ ] **Confidential Workflows private beta** — access is invite-only and separate from deploy
+      access. Form submitted; no confirmation yet.
 - [ ] Replace the placeholder endpoint (`postman-echo.com/headers`) and scoring stub with
       real strategy logic.
-- [ ] Deployment registry is `private` (Chainlink-hosted, off-chain, no gas).
+
+### Why live execution fails
+
+Every execution reports two errors:
+
+1. `confidential-workflows capability execution failed: ... cannot validate enclave config:
+   DON members not set`
+2. `secret retrieval failed for API_TOKEN (namespace: main): ... relay quorum unreachable:
+   0 signed responses, at most 3 possible, need 4 (collected=7 nodes=10 remaining=3 errors=7)`
+
+Both are node-side state, not anything in this repo:
+
+- `DON members not set` is raised by `validateEnclaveSigners` in
+  `chainlink-confidential-compute/capabilities/framework/executor.go`, which reads the node's
+  own `localNode.WorkflowDON.Members`. It is empty on the `zone-a` nodes, i.e. the
+  confidential-workflows capability is not provisioned for this tenant.
+- The gateway (`chainlink/core/services/gateway/handlers/confidentialrelay/handler.go`)
+  returns `InvalidParams` carrying the node's message when nodes reject a *user* error. The
+  generic `relay quorum unreachable` means 7 of 10 Vault relay nodes failed internally.
+- A plain (non-TEE, no-secret) workflow deployed by the same owner to the same DON executes
+  successfully, so account, deploy access, linking, registry and toolchain are all fine.
+- `CRE_CLI_DON_FAMILY=zone-fips` is rejected by the registry
+  (`DON family "zone-fips" is not supported`); `zone-a` is the only family available.
+
+Live execution should start working once Chainlink enrols the org in the beta. Nothing needs
+to change here.
 
 ## Useful commands
 
@@ -139,4 +168,6 @@ cre account access               # request deployment access
 cre registry list                # available deployment registries
 cre templates list               # template catalogue
 cre workflow simulate --help
+cre workflow list -e .env                                    # deployed workflows
+cre workflow get strategy-runner --target staging-settings -e .env   # health + recent executions
 ```
