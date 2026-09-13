@@ -50,6 +50,37 @@ export interface SubmittedTx {
 	txHash: string
 }
 
+/**
+ * Everything the browser needs to build and sign its own transactions. Served by
+ * GET /chain/config from the deploy step's address book, so no address is ever compiled
+ * into the client.
+ */
+export interface ChainConfig {
+	chainId: number
+	rpcUrl: string
+	usdcAddress: string
+	registryAddress: string
+	usdcDecimals: number
+}
+
+/**
+ * What the faucet did. Gas matters as much as USDC here: a pasted key with no ETH cannot
+ * send the approve and deposit that investing requires, and that failure reads as
+ * nonsense in the UI.
+ */
+export interface FaucetResult {
+	walletAddress: string
+	/** USDC minted by this call. */
+	minted: string
+	mintTxHash: string
+	/** Null when the wallet already held enough gas to transact. */
+	gasTxHash: string | null
+	/** Balances after the faucet ran. */
+	usdcBalance: string
+	/** Native balance in ether. */
+	gasBalance: string
+}
+
 // ─── Strategy ───────────────────────────────────────────────
 
 export interface StrategyMetrics {
@@ -128,7 +159,11 @@ export interface Position {
 export interface PortfolioSummary {
 	totalValue: string
 	totalInvested: string
-	/** Native gas balance, so the UI can warn before a transaction fails. */
+	/**
+	 * Native gas balance as a decimal string in whole ETH ("10.0"), 18dp — not wei, and
+	 * not the 6dp convention the USDC fields use. Present so the UI can warn before a
+	 * transaction fails for want of gas rather than after.
+	 */
 	gasBalance: string
 	allTimePnl: string
 	/** Percentage points, not a fraction: 42 = +42%. Unlike `totalReturn`, which is a fraction. */

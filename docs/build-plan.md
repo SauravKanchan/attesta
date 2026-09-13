@@ -73,6 +73,31 @@ The key is held in browser memory, persisted to `localStorage` only because this
 local dev build, and the login screen says so plainly. Replacing it with Privy means
 replacing where the signer comes from — the challenge/verify exchange is unchanged.
 
+### Where chain configuration comes from
+
+`GET /api/chain/config` is authoritative for chain id, RPC URL and **all contract
+addresses**. Addresses must never live in env: anvil redeploys move them, and a stale
+`.env` pointing at a dead address fails in a way that looks like a bug in the contract.
+
+`NEXT_PUBLIC_RPC_URL` and `NEXT_PUBLIC_CHAIN_ID` exist in `frontend/.env` as a
+**pre-hydration fallback only** — usable before the config fetch resolves, and overridden
+by the fetched values the moment they arrive. When the two disagree, the fetched config
+wins, every time. Nothing may read the env vars after hydration.
+
+### Privy is the eventual signer
+
+`frontend/src/lib/wallet.ts` exposes a signer interface with a local-private-key
+implementation behind it. Privy replaces the implementation, not the interface:
+
+```ts
+const provider = await wallet.getEthereumProvider()   // from Privy's useWallets()
+createWalletClient({ transport: custom(provider) })
+```
+
+`signMessage({ message })` still produces a `personal_sign` signature that
+`recoverMessageAddress` verifies, so the challenge/verify exchange is unchanged. Keep the
+signer source swappable and nothing else has to move.
+
 **Investing and withdrawing** are signed in the browser too:
 
 ```
