@@ -6,8 +6,10 @@
 //   money      leaves the database as base units and crosses the wire as a decimal string,
 //              converted only by lib/money.ts. A 1e6 slip looks like a plausible balance.
 //   metrics    are computed from the nav_snapshots the scheduler wrote, by lib/metrics.ts,
-//              and are null when the history is too short to state them. Never a stand-in
-//              number: a placeholder APY is indistinguishable from a real one.
+//              and are null when the history is too short to state them — annualised ones
+//              measured against MIN_ANNUALISE_MS, the same floor the chain-derived path
+//              uses. Never a stand-in number: a placeholder APY is indistinguishable from
+//              a real one, and an annualised minute is a placeholder with a decimal point.
 //
 // Vault totals are read from the chain rather than from the newest snapshot, because a
 // deposit changes them the moment it is mined and the next snapshot is a tick away. The
@@ -40,6 +42,7 @@ import {
 	type PositionRow,
 	type StrategyRow,
 } from '../db/schema.js'
+import { MIN_ANNUALISE_MS } from '../lib/annualise.js'
 import { computeMetrics, toNavSeries } from '../lib/metrics.js'
 import { formatAmount, percentChange, subAmounts, toBigInt, ZERO } from '../lib/money.js'
 import { navPerShare as parShare, positionValue } from '../lib/shares.js'
@@ -226,7 +229,7 @@ export function toMetrics(
 	investors: number,
 ): StrategyMetrics {
 	const points = toNavSeries(series)
-	const derived = computeMetrics(points)
+	const derived = computeMetrics(points, { minSpanMs: MIN_ANNUALISE_MS })
 	const newest = series[series.length - 1]
 	return {
 		apy: derived.apy,
@@ -338,11 +341,24 @@ export async function buildDetail(
 		description: strategy.description,
 		assets: strategy.assets,
 		sourceCode: strategy.sourceCode,
-		position: held ? toPositionDto(held, strategy, creator.username, totals) : null,
+		position: held && isHeld(held) ? toPositionDto(held, strategy, creator.username, totals) : null,
 	}
 }
 
 /* ── Positions ───────────────────────────────────────────── */
+
+/**
+ * Whether the row is still a holding.
+ *
+ * A position redeemed down to nothing keeps its row: the events on it are the audit trail
+ * the value series is drawn from, and the investor may allocate against it again. It is
+ * not money in a strategy, though, so the investor's own views must not offer it as one —
+ * an allocation of zero, priced at zero, with a withdraw button that could only revert.
+ * `investorCounts` and the on-chain holder count already draw the line at the same place.
+ */
+export function isHeld(position: PositionRow): boolean {
+	return toBigInt(position.shares) > 0n
+}
 
 export function toPositionDto(
 	position: PositionRow,

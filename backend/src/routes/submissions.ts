@@ -2,10 +2,11 @@
 //
 // Three properties of this file are load-bearing rather than incidental:
 //
-//   secrets are ciphertext only. The route inspects the envelope and refuses anything that
-//   could be read, because the trust claim in docs/project-overview.md is that the platform
-//   relays parameters it cannot open — and a single plaintext value quietly accepted here
-//   would make that claim false without anything appearing to break.
+//   secrets are ciphertext only. The route checks every parameter against the envelope rule
+//   in lib/secret-envelope.ts and refuses anything that could be read, because the trust
+//   claim in docs/project-overview.md is that the platform relays parameters it cannot
+//   open — and a single plaintext value quietly accepted here would make that claim false
+//   without anything appearing to break.
 //
 //   editing the source invalidates the checks. A submission whose code changed after it
 //   passed is a submission that has not been checked, so the checks go back to pending and
@@ -30,7 +31,6 @@ import {
 	makeCheck,
 } from '../../../chainlink/strategy-toolkit/src/index.js'
 import type {
-	EncryptedSecret,
 	SanityCheck,
 	StrategyDetail,
 	StrategyStatus,
@@ -39,6 +39,7 @@ import type {
 import { db } from '../db/index.js'
 import { secrets, strategies, submissions, type SubmissionRow } from '../db/schema.js'
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js'
+import { envelopeComplaint } from '../lib/secret-envelope.js'
 import { requireAuth, requireUser } from '../lib/session.js'
 import { getChainPort } from '../services.js'
 import { publishSubmission, runChecks } from '../strategy/index.js'
@@ -92,18 +93,6 @@ const patchBody = z
 	.refine((value) => Object.keys(value).length > 0, 'nothing to update')
 
 const idParams = z.object({ id: z.string().trim().min(1).max(64) })
-
-/**
- * Every scheme posts the same self-describing envelope: the scheme, a version, and then
- * that scheme's base64 parts — `local-dev.v1.<iv>.<ciphertext>`, and for TDH2 the nonce
- * and the two ciphertexts. A stored blob therefore announces how to read itself, and no
- * scheme is checked more loosely than another.
- *
- * Requiring the whole envelope, rather than asking whether a value merely looks opaque,
- * is what makes the refusal real: an API key, a hex string and a passphrase are all
- * opaque, and any test that admits them admits a readable secret into the platform.
- */
-const ENVELOPE = /^(?:local-dev|tdh2-p256-aesgcm)\.v\d+(?:\.[A-Za-z0-9+/]{8,}={0,2}){2,4}$/
 
 const secretsBody = z
 	.array(
@@ -185,7 +174,7 @@ export async function submissionRoutes(app: FastifyInstance): Promise<void> {
 		requireEditable(submission)
 
 		for (const secret of body) {
-			const complaint = plaintextComplaint(secret.ciphertext, secret.scheme)
+			const complaint = envelopeComplaint(secret.ciphertext, secret.scheme)
 			if (complaint) {
 				request.log.warn(
 					{ submissionId: id, key: secret.key, scheme: secret.scheme, complaint },
@@ -413,17 +402,6 @@ function failingCheck(checks: readonly SanityCheck[]): SanityCheck | null {
 		if (check.status !== 'passed') return check
 	}
 	return makeCheck('parses', 'pending', 'the sanity pipeline has not been run')
-}
-
-/**
- * Why a value does not look like ciphertext, or null when it does. Deliberately a shape
- * test rather than a guess at whether the text is "secret-looking": an envelope the
- * browser produced always matches, and anything a person typed never does.
- */
-function plaintextComplaint(ciphertext: string, scheme: EncryptedSecret['scheme']): string | null {
-	if (/\s/.test(ciphertext)) return 'it contains whitespace'
-	if (!ENVELOPE.test(ciphertext)) return `it is not a ${scheme}.v1.<base64>.<base64> envelope`
-	return ciphertext.startsWith(`${scheme}.`) ? null : `its envelope was not produced by ${scheme}`
 }
 
 function requireOwnedSubmission(request: FastifyRequest, id: string): SubmissionRow {

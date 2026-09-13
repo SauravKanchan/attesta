@@ -24,6 +24,7 @@ import {
 	creatorOf,
 	creatorsFor,
 	EMPTY_TOTALS,
+	isHeld,
 	positionEventsFor,
 	positionValueSeries,
 	readTotals,
@@ -60,14 +61,19 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
 			}),
 		)
 
-		const dtos: Position[] = held.map((row) =>
-			toPositionDto(
-				row.position,
-				row.strategy,
-				creatorOf(creators, row.strategy.creatorId).username,
-				totals.get(row.strategy.id) ?? EMPTY_TOTALS,
-			),
-		)
+		// Only what is still held is listed. A fully redeemed position stays in `held` so
+		// that `valueSeries` can still price what it was worth before the exit, but it is
+		// not an allocation any more and is not offered as one.
+		const dtos: Position[] = held
+			.filter((row) => isHeld(row.position))
+			.map((row) =>
+				toPositionDto(
+					row.position,
+					row.strategy,
+					creatorOf(creators, row.strategy.creatorId).username,
+					totals.get(row.strategy.id) ?? EMPTY_TOTALS,
+				),
+			)
 
 		// Summed in base units, off the same rows the DTOs were built from, so the total is
 		// exact rather than a sum of already-rounded decimal strings.

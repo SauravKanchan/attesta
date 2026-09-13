@@ -19,15 +19,8 @@ import type { StrategyMetrics, TimeseriesPoint } from '../../../shared/types.js'
 import { strategyVaultAbi } from '../chain/abis.js'
 import { publicClient } from '../chain/client.js'
 import { consoleLogger, type Logger } from '../strategy/ports.js'
+import { MIN_ANNUALISE_MS } from './annualise.js'
 import { computeMetrics, type NavPoint } from './metrics.js'
-
-/**
- * Below this observation window an annualised figure is not a projection, it is an
- * artefact: compounding twenty minutes of drift over a year saturates every loss to
- * exactly -100% and blows every gain past 1e100. `totalReturn` stays honest at any span,
- * so APY reports null until there is enough history to mean something.
- */
-const MIN_ANNUALISE_MS = 6 * 60 * 60 * 1000
 import { formatAmount } from './money.js'
 import { navPerShare as parShare } from './shares.js'
 

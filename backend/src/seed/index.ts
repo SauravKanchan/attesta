@@ -49,6 +49,7 @@ import { toStrategyId } from '../lib/strategy-id.js'
 import { buildServer } from '../server.js'
 import { connectChain } from '../services.js'
 import { strategyConfig } from '../strategy/config.js'
+import { giveTrackRecord, trackRecordFromEnv } from './track-record.js'
 
 interface Template {
 	/** File name under chainlink/templates/examples, and the log label. */
@@ -315,8 +316,9 @@ console.log(`seed server on ${BASE}`)
 console.log(`oracle for the enclave: ${strategyConfig.oracleUrl}`)
 console.log(`workflow workspace: ${strategyConfig.workspaceDir}`)
 
-// The scheduler is deliberately not started. The seed publishes; ticking is the job of
-// whoever runs the backend against this database afterwards.
+// The 60 s loop is deliberately not started: the ticks this run needs are driven one at a
+// time by the track record phase below, and a timer firing underneath them would settle
+// the same vault from the same operator nonce.
 if (!(await connectChain(app.log))) {
 	await app.close()
 	closeDatabase()
@@ -333,6 +335,39 @@ try {
 	await app.close()
 	closeDatabase()
 	throw error
+}
+
+// Publishing alone leaves every card showing nulls and an amber badge, because performance
+// is derived from vault settlements and the badge from execution rows. This is the phase
+// that produces both — a real deposit, then real ticks — so a cold seed comes up worth
+// looking at. A failure here is loud but not fatal: the strategies published, and a flat
+// marketplace is still a usable one.
+let trackRecordSummary = 'not attempted'
+const trackRecord = published.length === 0 ? null : trackRecordFromEnv(BASE)
+if (!trackRecord) {
+	trackRecordSummary =
+		published.length === 0 ? 'skipped: nothing published to fund' : 'skipped by SEED_TRACK_RECORD=false'
+	console.log(`\ntrack record ${trackRecordSummary}`)
+} else {
+	heading(`track record: ${trackRecord.slug}`)
+	try {
+		const record = await giveTrackRecord(trackRecord)
+		trackRecordSummary = `${record.slug} funded with ${record.deposited} USDC by ${record.investorAddress}, ticked ${record.outcomes.length}× (${record.attestedTicks} in the enclave, ${record.settledTicks} settled), navPerShare ${record.navFrom} -> ${record.navTo}`
+		if (record.attestedTicks === 0) {
+			console.warn('  no tick reached the enclave, so the card will still read "awaiting attestation"')
+			process.exitCode = 1
+		}
+		if (!record.navMoved) {
+			console.warn(
+				`  ${record.slug} never left ${record.navFrom}: the card will read a flat line and a total return of exactly zero. Raise SEED_MAX_TICKS, or fund a strategy that takes exposure more often.`,
+			)
+			process.exitCode = 1
+		}
+	} catch (error) {
+		trackRecordSummary = 'failed — the marketplace is published but flat'
+		console.error('  the track record phase failed', error)
+		process.exitCode = 1
+	}
 }
 
 await app.close()
@@ -352,6 +387,7 @@ for (const entry of published) {
 for (const failure of failures) {
 	console.error(`  FAILED ${failure.template}: ${failure.reason}`)
 }
+console.log(`  track record    ${trackRecordSummary}`)
 
 await snapshot()
 
