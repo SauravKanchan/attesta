@@ -1,0 +1,295 @@
+@import "tailwindcss";
+
+/*
+ * Cryptographic Quantitative Terminal.
+ * Every colour, radius, shadow and type step the product uses is declared here;
+ * nothing outside this file should carry a literal hex value.
+ */
+@theme {
+	/* Ground and surfaces */
+	--color-canvas: #090A0D;
+	--color-surface-1: #0E1117;
+	--color-surface-2: #141820;
+	--color-interact: #1C222E;
+
+	/* Hairlines */
+	--color-hairline: #27272A;
+	--color-hairline-strong: #3F3F46;
+
+	/* Verified / primary */
+	--color-verified: #10B981;
+	--color-verified-hover: #34D399;
+	--color-verified-active: #059669;
+
+	/* Telemetry */
+	--color-telemetry: #0284C7;
+	--color-telemetry-hover: #38BDF8;
+
+	/* Risk and warning */
+	--color-risk: #EF4444;
+	--color-risk-light: #F87171;
+	--color-warning: #F59E0B;
+	--color-warning-light: #FCD34D;
+
+	/* Foreground */
+	--color-fg: #F8FAFC;
+	--color-fg-secondary: #94A3B8;
+	--color-fg-muted: #475569;
+
+	/* Families. Inter carries UI text, JetBrains Mono carries every number. */
+	--font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	--font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+	/* 4px radii by default, 2px for chips and hash tags. Nothing is pill-shaped. */
+	--radius-xs: 2px;
+	--radius-sm: 4px;
+	--radius-md: 4px;
+	--radius-lg: 4px;
+
+	/* The only shadow in the system. */
+	--shadow-modal: 0 20px 40px -10px rgba(0, 0, 0, 0.85);
+
+	/*
+	 * 8px grid with 4px micro-spacers, so the fixed densities of the system fall
+	 * straight out of the scale: table rows h-8 (32px), compact buttons h-7 (28px),
+	 * standard buttons h-9 (36px), the sidebar w-65 (260px).
+	 */
+	--spacing: 4px;
+}
+
+@layer base {
+	/* Tailwind v4 defaults border-color to currentColor; hairlines are the norm here. */
+	*,
+	::before,
+	::after {
+		border-color: var(--color-hairline);
+	}
+
+	html {
+		color-scheme: dark;
+		background-color: var(--color-canvas);
+	}
+
+	body {
+		background-color: var(--color-canvas);
+		color: var(--color-fg);
+		font-family: var(--font-sans);
+		font-size: 13px;
+		line-height: 20px;
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+	}
+
+	/* Mono is only ever used for figures, hashes, tickers and code, so tabular
+	   and slashed-zero figures can be switched on family-wide. */
+	.font-mono,
+	code,
+	pre,
+	kbd,
+	samp {
+		font-feature-settings: "tnum" on, "zero" on;
+		font-variant-numeric: tabular-nums slashed-zero;
+	}
+
+	::selection {
+		background-color: color-mix(in oklab, var(--color-verified) 32%, transparent);
+	}
+
+	:focus-visible {
+		outline: 1px solid var(--color-telemetry-hover);
+		outline-offset: 1px;
+	}
+
+	::-webkit-scrollbar {
+		width: 10px;
+		height: 10px;
+	}
+
+	::-webkit-scrollbar-track {
+		background-color: var(--color-canvas);
+	}
+
+	::-webkit-scrollbar-thumb {
+		background-color: var(--color-hairline);
+		border: 3px solid var(--color-canvas);
+		border-radius: 999px;
+	}
+
+	::-webkit-scrollbar-thumb:hover {
+		background-color: var(--color-hairline-strong);
+	}
+}
+
+/*
+ * Type scale. Each step is a single utility so size, weight and tracking always
+ * travel together and never fight a competing font-* utility.
+ */
+@utility type-headline-xl {
+	font-family: var(--font-sans);
+	font-size: 32px;
+	line-height: 38px;
+	font-weight: 600;
+	letter-spacing: -0.025em;
+}
+
+@utility type-headline-lg {
+	font-family: var(--font-sans);
+	font-size: 24px;
+	line-height: 30px;
+	font-weight: 600;
+	letter-spacing: -0.015em;
+}
+
+@utility type-headline-md {
+	font-family: var(--font-sans);
+	font-size: 18px;
+	line-height: 24px;
+	font-weight: 600;
+}
+
+@utility type-headline-sm {
+	font-family: var(--font-sans);
+	font-size: 15px;
+	line-height: 20px;
+	font-weight: 600;
+}
+
+@utility type-body-lg {
+	font-family: var(--font-sans);
+	font-size: 15px;
+	line-height: 22px;
+	font-weight: 400;
+}
+
+@utility type-body-md {
+	font-family: var(--font-sans);
+	font-size: 13px;
+	line-height: 20px;
+	font-weight: 400;
+}
+
+@utility type-body-sm {
+	font-family: var(--font-sans);
+	font-size: 12px;
+	line-height: 18px;
+	font-weight: 400;
+}
+
+@utility type-code-lg {
+	font-family: var(--font-mono);
+	font-size: 14px;
+	line-height: 20px;
+	font-weight: 500;
+	font-feature-settings: "tnum" on, "zero" on;
+	font-variant-numeric: tabular-nums slashed-zero;
+}
+
+@utility type-code-md {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	line-height: 18px;
+	font-weight: 500;
+	font-feature-settings: "tnum" on, "zero" on;
+	font-variant-numeric: tabular-nums slashed-zero;
+}
+
+@utility type-code-sm {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	line-height: 16px;
+	font-weight: 500;
+	font-feature-settings: "tnum" on, "zero" on;
+	font-variant-numeric: tabular-nums slashed-zero;
+}
+
+@utility type-label-caps {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	line-height: 14px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	font-feature-settings: "tnum" on, "zero" on;
+	font-variant-numeric: tabular-nums slashed-zero;
+}
+
+@utility type-metric-display {
+	font-family: var(--font-mono);
+	font-size: 28px;
+	line-height: 32px;
+	font-weight: 600;
+	letter-spacing: -0.03em;
+	font-feature-settings: "tnum" on, "zero" on;
+	font-variant-numeric: tabular-nums slashed-zero;
+}
+
+@utility type-metric-lg {
+	font-family: var(--font-mono);
+	font-size: 20px;
+	line-height: 26px;
+	font-weight: 600;
+	font-feature-settings: "tnum" on, "zero" on;
+	font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* Any figure that is not already inside a mono type step. */
+@utility num {
+	font-family: var(--font-mono);
+	font-feature-settings: "tnum" on, "zero" on;
+	font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* A field sunk below its surface — used for hashes and other read-only artefacts. */
+@utility recessed {
+	background-color: var(--color-canvas);
+	border: 1px solid var(--color-hairline);
+}
+
+@keyframes attesta-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
+}
+
+@keyframes attesta-sheen {
+	from {
+		background-position: 120% 0;
+	}
+	to {
+		background-position: -20% 0;
+	}
+}
+
+@keyframes attesta-slide-in {
+	from {
+		transform: translateX(12px);
+		opacity: 0;
+	}
+	to {
+		transform: translateX(0);
+		opacity: 1;
+	}
+}
+
+@utility pulse-dot {
+	animation: attesta-pulse 2s ease-in-out infinite;
+}
+
+@utility sheen {
+	background-image: linear-gradient(
+		90deg,
+		var(--color-surface-2) 0%,
+		var(--color-interact) 50%,
+		var(--color-surface-2) 100%
+	);
+	background-size: 220% 100%;
+	animation: attesta-sheen 1.4s linear infinite;
+}
+
+@utility slide-in {
+	animation: attesta-slide-in 160ms ease-out;
+}

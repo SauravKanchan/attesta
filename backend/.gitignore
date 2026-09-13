@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+.env
+
+# A global ignore rule for build output directories named "lib" would otherwise swallow
+# src/lib, which is source.
+!src/lib/

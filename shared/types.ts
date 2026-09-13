@@ -97,6 +97,7 @@ export interface Position {
 	costBasis: string
 	currentValue: string
 	unrealisedPnl: string
+	/** Percentage points, not a fraction: 42 = +42%. Unlike `totalReturn`, which is a fraction. */
 	unrealisedPnlPct: number
 	firstAllocatedAt: string
 }
@@ -105,6 +106,7 @@ export interface PortfolioSummary {
 	totalValue: string
 	totalInvested: string
 	allTimePnl: string
+	/** Percentage points, not a fraction: 42 = +42%. Unlike `totalReturn`, which is a fraction. */
 	allTimePnlPct: number
 	availableUsdc: string
 	walletAddress: string

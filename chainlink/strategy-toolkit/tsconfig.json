@@ -1,0 +1,21 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"lib": ["ES2023"],
+		"types": ["node"],
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"noEmit": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true,
+		"resolveJsonModule": true,
+		"verbatimModuleSyntax": false
+	},
+	"include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
+	// Compiled by `cre workflow build` inside the generated directory, against
+	// the CRE SDK, which this package does not depend on.
+	"exclude": ["src/cre-workflow/**"]
+}

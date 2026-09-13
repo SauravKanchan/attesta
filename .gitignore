@@ -49,3 +49,8 @@ logs/
 # The global gitignore excludes [Ss]cripts; this project keeps script directories.
 !**/scripts/
 !**/scripts/**
+
+# The global gitignore excludes [Ll]ib, which matches source directories named lib/.
+# Foundry's contracts/lib is a real dependency dir and stays excluded (above).
+!**/src/lib/
+!**/src/lib/**

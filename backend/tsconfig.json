@@ -1,0 +1,30 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"lib": ["ES2023"],
+		"module": "ES2022",
+		"moduleResolution": "Bundler",
+		"types": ["node"],
+
+		/* Emit lands under dist/backend/src because the program root is the repo root:
+		   backend compiles ../shared/*.ts directly rather than through a build step.
+		   shared/ has no package.json of its own, so ES2022 module emit is what keeps those
+		   files ESM alongside the backend's; relative specifiers carry .js so the compiled
+		   output resolves under plain node. */
+		"rootDir": "..",
+		"outDir": "dist",
+		"sourceMap": true,
+
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"noImplicitOverride": true,
+		"noFallthroughCasesInSwitch": true,
+		"verbatimModuleSyntax": true,
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"resolveJsonModule": true,
+		"skipLibCheck": true
+	},
+	"include": ["src/**/*.ts", "test/**/*.ts", "drizzle.config.ts", "../shared/**/*.ts"],
+	"exclude": ["dist", "node_modules"]
+}
