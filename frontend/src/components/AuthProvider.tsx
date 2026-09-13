@@ -154,7 +154,10 @@ export function PrivyWalletProvider({ children }: { children: ReactNode }) {
 		<PrivyProvider
 			appId={appId}
 			config={{
-				loginMethods: ['email', 'google'],
+				// Each entry is also a dashboard toggle: this array selects from what the app
+				// has enabled, it cannot enable anything. A method that is off in the dashboard
+				// still renders a button here, and fails when the user picks it.
+				loginMethods: ['email', 'google', 'passkey', 'wallet'],
 				embeddedWallets: { ethereum: { createOnLogin: 'users-without-wallets' } },
 				supportedChains: [chain],
 				defaultChain: chain,
@@ -186,6 +189,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	const interactive = useRef(false)
 	/** Guards against asking Privy for a second wallet while the first is being made. */
 	const requestedWallet = useRef(false)
+	/**
+	 * The exchange runs to completion once started. It cannot be tied to effect cleanup:
+	 * the effect's own `setPrivyPhase` is one of its dependencies, so a cleanup guard would
+	 * cancel the sign-in one tick after starting it, between `verify` returning and the
+	 * token being kept.
+	 */
+	const proving = useRef(false)
+	/**
+	 * `usePrivy` hands back fresh function identities on most renders, so depending on the
+	 * session object itself would re-run the completion effect mid-flight and cancel the
+	 * exchange it just started. The effect depends on the primitives and reads the
+	 * functions from here.
+	 */
+	const privyRef = useRef(privy)
+	privyRef.current = privy
+	const privyAddress = privy.wallet?.address ?? null
 
 	useEffect(() => {
 		let cancelled = false
@@ -194,27 +213,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			return
 		}
 
-		// A session whose key this browser no longer holds can read but cannot sign, and
-		// every money action would fail at the last step. Treat it as signed out.
+		// Being signed in and being able to sign are different things. The session is a
+		// bearer token the backend issued; the signer is what moves money. Privy restores
+		// its wallet asynchronously and sometimes not at all, so tearing down a valid
+		// session because the signer has not arrived logs the user out of a session that
+		// was never in question. Reconnect the signer in the background instead, and let
+		// `requireSigner()` speak up at the point a signature is actually needed.
 		const signer = getSigner()
 		if (signer === null) {
 			if (storedSignerKind() === 'privy') {
-				// The embedded wallet is not in hand until Privy has booted, so hold the
-				// 'loading' status and let the effect below finish the restore.
 				interactive.current = false
 				setPrivyPhase('awaiting')
+			} else {
+				console.warn('attesta: a session token survived without its wallet key; signing out')
+				setToken(null)
+				setStatus('anonymous')
 				return
 			}
-			console.warn('attesta: a session token survived without its wallet key; signing out')
-			setToken(null)
-			setStatus('anonymous')
-			return
 		}
 
 		getMe()
 			.then((me) => {
 				if (cancelled) return
-				if (me.walletAddress.toLowerCase() !== signer.address.toLowerCase()) {
+				if (signer !== null && me.walletAddress.toLowerCase() !== signer.address.toLowerCase()) {
 					console.warn('attesta: the stored wallet signs for a different address than the session', {
 						session: me.walletAddress,
 						wallet: signer.address,
@@ -288,6 +309,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	}, [privy])
 
 	/**
+	 * Picks up a sign-in this page never saw start. Google's OAuth flow leaves the app and
+	 * comes back, so every piece of React state from the click is gone by the time Privy
+	 * reports success — including the phase the completion effect waits on. Privy arriving
+	 * authenticated while attesta holds no session is the only evidence left that someone
+	 * asked to sign in, so treat it as the start of one.
+	 */
+	useEffect(() => {
+		if (privyPhase !== 'idle') return
+		if (!privy.available || !privy.ready || !privy.authenticated) return
+		if (getToken() !== null) return
+		interactive.current = true
+		setPrivyPhase('awaiting')
+	}, [privyPhase, privy.available, privy.ready, privy.authenticated])
+
+	/**
 	 * Finishes a Privy sign-in once an embedded wallet exists — on the click path and on
 	 * the reload path alike, because both end in the same place: a wallet that can sign.
 	 */
@@ -312,11 +348,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		// provision at all: 'users-without-wallets' skips creation entirely for an account
 		// that already has a wallet linked, which leaves this waiting forever. Ask once,
 		// and let the next render pick up the wallet it returns.
-		const wallet = privy.wallet
+		const wallet = privyRef.current.wallet
 		if (wallet === null) {
 			if (!requestedWallet.current) {
 				requestedWallet.current = true
-				void privy.createWallet().catch((error: unknown) => {
+				void privyRef.current.createWallet().catch((error: unknown) => {
 					// Already having one is the benign case — the wallets list will catch up.
 					console.error('attesta: could not create the Privy embedded wallet', error)
 				})
@@ -324,7 +360,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			return
 		}
 
-		let cancelled = false
+		if (proving.current) return
+		proving.current = true
 		const wasInteractive = interactive.current
 		setPrivyPhase('signing')
 
@@ -332,12 +369,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			try {
 				const signer = signInWithPrivy(wallet)
 				const session = await proveAddress(signer)
-				if (cancelled) return
 				setToken(session.token)
 				setUser(session.user)
 				setStatus('authenticated')
 				setPrivyPhase('idle')
 				requestedWallet.current = false
+				proving.current = false
 
 				if (wasInteractive) {
 					// A fresh embedded wallet holds no ETH, so its first approve would fail
@@ -353,7 +390,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				}
 			} catch (error) {
 				console.error('attesta: proving control of the Privy wallet failed', error)
-				if (cancelled) return
+				proving.current = false
 				clearWallet()
 				setToken(null)
 				setUser(null)
@@ -363,17 +400,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				setPrivyError(error instanceof Error ? error.message : 'Privy sign-in failed')
 			}
 		})()
+		// Deliberately keyed on the wallet's address rather than the object: Privy hands
+		// back a new `wallets` array as its state settles, and re-running on that identity
+		// would cancel the exchange between `verify` returning and the token being kept.
+	}, [privyPhase, privy.available, privy.ready, privy.authenticated, privyAddress, proveAddress, router])
 
-		return () => {
-			cancelled = true
-		}
-	}, [privyPhase, privy, proveAddress, router])
-
-	/** A modal the user closed leaves 'awaiting' hanging; this is the way out of it. */
+	/** A modal the user closed leaves the phase hanging; this is the way out of it. */
 	useEffect(() => {
-		if (privyPhase !== 'awaiting') return
+		if (privyPhase === 'idle') return
 		const timer = window.setTimeout(() => {
-			console.error('attesta: the Privy sign-in never produced a wallet', {
+			console.error('attesta: the Privy sign-in never landed a session', {
+				phase: privyPhase,
 				ready: privy.ready,
 				authenticated: privy.authenticated,
 			})
@@ -393,6 +430,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		setPrivyPhase('idle')
 		setPrivyError(null)
 		interactive.current = false
+		requestedWallet.current = false
+		proving.current = false
 		if (kind === 'privy' && privy.available) {
 			privy.logout().catch((error: unknown) => {
 				console.error('attesta: signing out of Privy failed', error)
