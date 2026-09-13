@@ -14,6 +14,7 @@ import { truncateAddress } from '@/lib/format'
 import { writeSessionHint } from '@/lib/session-hint'
 import type { SessionHint } from '@/lib/session-hint'
 import type { User } from '@/lib/types'
+import { CopyableHash } from '@/components/ui/CopyableHash'
 
 const COLLAPSE_STORAGE_KEY = 'attesta.sidebar.collapsed'
 
@@ -236,18 +237,21 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
  * only worth its row when it says something the line above it does not.
  */
 function SidebarIdentity({ user }: { user: User | null }) {
-	const address = truncateAddress(user?.walletAddress)
 	const named = user?.username !== undefined && !isAddressDerived(user.username)
 	return (
 		<div className="min-w-0 flex-1">
-			<p className="truncate type-code-sm text-fg" title={user?.walletAddress ?? undefined}>
-				{named ? user.username : address}
-			</p>
 			{named ? (
-				<p className="truncate type-code-sm text-fg-muted" title={user?.walletAddress ?? undefined}>
-					{address}
-				</p>
-			) : null}
+				<>
+					<p className="truncate type-code-sm text-fg" title={user?.walletAddress ?? undefined}>
+						{user.username}
+					</p>
+					<CopyableHash value={user?.walletAddress} lead={6} tail={4} label="wallet address" />
+				</>
+			) : (
+				// The address is the identity here, so it is the thing worth copying — you
+				// need it to fund the wallet or look it up on chain.
+				<CopyableHash value={user?.walletAddress} lead={6} tail={4} label="wallet address" />
+			)}
 		</div>
 	)
 }
